@@ -5,13 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Управление Кинозалом</title>
     
-    <!-- Стили Fluid Player -->
-    <link rel="stylesheet" href="https://cdn.fluidplayer.com/v3/current/fluidplayer.min.css" type="text/css"/>
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: sans-serif; }
         .video-container { width: 100%; height: 100%; position: relative; }
-        video { width: 100% !important; height: 100% !important; }
+        .video-js { width: 100% !important; height: 100% !important; }
         .click-blocker { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 50px); z-index: 999; display: none; }
         
         /* Панель Управления для Администратора */
@@ -33,9 +32,6 @@
         }
         #admin-panel button:hover { background: #1d4ed8; }
         .panel-section { margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 10px; }
-        
-        /* Скрытие элементов управления плеера на экране зрителей */
-        .hide-controls .fluid_controls_container { display: none !important; }
     </style>
 </head>
 <body>
@@ -55,13 +51,12 @@
     </div>
 </div>
 
-<div class="video-container" id="player-wrapper">
+<div class="video-container">
     <div id="blocker" class="click-blocker"></div>
-    <video id="my-player" controls></video>
+    <video id="my-player" class="video-js vjs-default-skin vjs-big-play-centered"></video>
 </div>
 
-<!-- Скрипты плеера и P2P сети -->
-<script src="https://cdn.fluidplayer.com/v3/current/fluidplayer.min.js"></script>
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
 <script>
@@ -69,55 +64,45 @@
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('role') === 'admin';
 
-    let playerInstance = null;
-    const videoElement = document.getElementById('my-player');
+    // Запускаем Video.js с жестким лимитом памяти для HLS под капотом
+    const player = videojs('my-player', { 
+        controls: true, 
+        autoplay: false, 
+        preload: 'auto',
+        html5: {
+            hls: {
+                maxBufferLength: 30,         // Ограничение: не более 30 секунд видео вперед
+                maxMaxBufferLength: 60,      // Потолок кэша — 60 секунд
+                backBufferLength: 15,        // Удалять из памяти всё, что просмотрено более 15 секунд назад
+                maxBufferSize: 30 * 1024 * 1024 // Лимит буфера в ОЗУ — 30 Мегабайт
+            }
+        }
+    });
 
-    // Настройка интерфейса для зрителя до старта видео
-    if (!isAdmin) {
-        document.getElementById('blocker').style.display = 'block';
-        document.getElementById('player-wrapper').classList.add('hide-controls');
-        window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
-    }
+    player.ready(function() {
+        if (!isAdmin) {
+            document.getElementById('blocker').style.display = 'block';
+            if (player.controlBar.playToggle) player.controlBar.playToggle.hide();
+            if (player.controlBar.progressControl) player.controlBar.progressControl.hide();
+            window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
+        }
+    });
 
-    // Смена транслируемого видеопотока с динамической инициализацией плеера
+    let connections = [];
+    let currentHlsLink = "";
+
     function changeStream(newUrl, isRemote = false) {
         const url = newUrl || document.getElementById('hls-input').value.trim();
         if (!url) return;
 
         currentHlsLink = url;
-
-        // Если плеер еще не инициализирован — создаем его при первой загрузке видео
-        if (!playerInstance) {
-            videoElement.src = url;
-            playerInstance = fluidPlayer('my-player', {
-                layoutControls: {
-                    fillToContainer: true,
-                    primaryColor: "#2563eb",
-                    playPauseAnimation: true,
-                    autoPlay: true,
-                    mute: false
-                },
-                hlsConfig: {
-                    maxBufferLength: 30,
-                    maxMaxBufferLength: 60,
-                    backBufferLength: 15,
-                    maxBufferSize: 30 * 1024 * 1024
-                }
-            });
-            setupEvents(); // Привязываем события синхронизации
-        } else {
-            // Если плеер уже есть — просто меняем источник
-            videoElement.src = url;
-            videoElement.play().catch(() => {});
-        }
+        player.src({ src: url, type: 'application/x-mpegURL' });
+        player.play().catch(() => {});
 
         if (isAdmin && !isRemote) {
             connections.forEach(c => c.send({ action: 'change_src', url: url }));
         }
     }
-
-    let connections = [];
-    let currentHlsLink = "";
 
     // === СИСТЕМА СИНХРОНИЗАЦИИ (PEERJS) ===
     if (isAdmin) {
@@ -130,55 +115,50 @@
 
         peer.on('connection', conn => {
             connections.push(conn);
-            
             setTimeout(() => {
                 if (currentHlsLink) {
                     conn.send({ action: 'change_src', url: currentHlsLink });
                     setTimeout(() => {
-                        conn.send({ action: 'seek', time: videoElement.currentTime });
-                        if (!videoElement.paused) conn.send({ action: 'play' });
+                        conn.send({ action: 'seek', time: player.currentTime() });
+                        if (!player.paused()) conn.send({ action: 'play' });
                     }, 1500);
                 }
             }, 1000);
         });
+
+        // Умная синхронизация без рассинхронов при перемотке
+        player.on('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
+        player.on('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
+        
+        player.on('seeking', () => { 
+            connections.forEach(c => c.send({ action: 'pause' }));
+            connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() })); 
+        });
+        
+        player.on('seeked', () => {
+            setTimeout(() => {
+                connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() }));
+                if (!player.paused()) connections.forEach(c => c.send({ action: 'play' }));
+            }, 1000);
+        });
+
     } else {
         const peer = new Peer();
         peer.on('open', () => {
             const conn = peer.connect(ROOM_ID);
-            
             conn.on('data', data => {
                 if (data.action === 'change_src') {
                     changeStream(data.url, true);
                 } else if (data.action === 'play') {
-                    if (videoElement.src) videoElement.play().catch(() => {});
+                    player.play().catch(() => {});
                 } else if (data.action === 'pause') {
-                    videoElement.pause();
+                    player.pause();
                 } else if (data.action === 'seek') {
-                    if (Math.abs(videoElement.currentTime - data.time) > 2) {
-                        videoElement.currentTime = data.time;
+                    if (Math.abs(player.currentTime() - data.time) > 2) {
+                        player.currentTime(data.time);
                     }
                 }
             });
-        });
-    }
-
-    // Функция привязки событий (вызывается только после создания плеера)
-    function setupEvents() {
-        if (!isAdmin) return;
-
-        videoElement.addEventListener('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
-        videoElement.addEventListener('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
-        
-        videoElement.addEventListener('seeking', () => { 
-            connections.forEach(c => c.send({ action: 'pause' }));
-            connections.forEach(c => c.send({ action: 'seek', time: videoElement.currentTime })); 
-        });
-        
-        videoElement.addEventListener('seeked', () => {
-            setTimeout(() => {
-                connections.forEach(c => c.send({ action: 'seek', time: videoElement.currentTime }));
-                if (!videoElement.paused) connections.forEach(c => c.send({ action: 'play' }));
-            }, 1000);
         });
     }
 </script>
