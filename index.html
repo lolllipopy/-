@@ -44,17 +44,16 @@
         if (player.controlBar.progressControl) player.controlBar.progressControl.show();
     }
 
-	async function changeStream(url, forcePlay) {
+	function changeStream(url, forcePlay) {
     currentHlsLink = url;
+    player.src({ src: url, type: 'application/x-mpegURL' });
     
-    const blob = new Blob([`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1280000\n${url}`], {type: 'application/vnd.apple.mpegurl'});
-    const blobUrl = URL.createObjectURL(blob);
     
-    player.src({ src: blobUrl, type: 'application/x-mpegURL' });
+    const videoTag = document.querySelector('video');
+    videoTag.removeAttribute('src');
     
-    const sources = document.querySelectorAll('source');
-    sources.forEach(s => s.remove());
-
+    videoTag.removeAttribute('data-setup');
+    
     if (forcePlay) player.play().catch(() => {}); else player.pause();
 }
     
