@@ -38,7 +38,7 @@
 
 <div id="admin-panel">
     <div class="panel-section">
-        <strong>Панель Управления</strong>
+        <strong>Панель Управления (Защищено)</strong>
     </div>
     <div class="panel-section">
         <label>1. Постоянная ссылка для зрителей:</label>
@@ -60,21 +60,27 @@
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
 <script>
+    // === НАСТРОЙКА БЕЗОПАСНОСТИ ===
+    // Замените слово 'super_secret_code_777' на любой свой секретный пароль
+    const SECRET_KEY = 'zCNf4deVHt1IJnZXQxvd'; 
+
     const ROOM_ID = 'room_' + btoa(window.location.hostname).replace(/[^a-zA-Z0-9]/g, '').substring(0, 12).toLowerCase();
     const urlParams = new URLSearchParams(window.location.search);
-    const isAdmin = urlParams.get('role') === 'admin';
+    
+    // Теперь проверяется именно секретный ключ в параметре ?key=...
+    const isAdmin = urlParams.get('key') === SECRET_KEY;
 
-    // Запускаем Video.js с жестким лимитом памяти для HLS под капотом
+    // Запускаем Video.js с ограничением кэша памяти
     const player = videojs('my-player', { 
         controls: true, 
         autoplay: false, 
         preload: 'auto',
         html5: {
             hls: {
-                maxBufferLength: 30,         // Ограничение: не более 30 секунд видео вперед
-                maxMaxBufferLength: 60,      // Потолок кэша — 60 секунд
-                backBufferLength: 15,        // Удалять из памяти всё, что просмотрено более 15 секунд назад
-                maxBufferSize: 30 * 1024 * 1024 // Лимит буфера в ОЗУ — 30 Мегабайт
+                maxBufferLength: 30,
+                maxMaxBufferLength: 60,
+                backBufferLength: 15,
+                maxBufferSize: 30 * 1024 * 1024
             }
         }
     });
@@ -110,6 +116,7 @@
         const peer = new Peer(ROOM_ID);
 
         peer.on('open', () => {
+            // Ссылка для зрителей в админке теперь всегда генерируется чистой (без пароля)
             document.getElementById('share-url').value = window.location.origin + window.location.pathname;
         });
 
@@ -126,7 +133,6 @@
             }, 1000);
         });
 
-        // Умная синхронизация без рассинхронов при перемотке
         player.on('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
         player.on('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
         
