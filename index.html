@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Приватный кинотеатр</title>
+    <title>Приватный Плеер</title>
+    
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     
     <style>
         body, html {
@@ -13,123 +15,79 @@
             height: 100%;
             background-color: #000;
             overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-family: sans-serif;
         }
         .video-container {
-            position: relative;
             width: 100%;
             height: 100%;
         }
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            background: #000;
+        .video-js {
+            width: 100% !important;
+            height: 100% !important;
         }
+        /* Щит для зрителей */
         .click-blocker {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
-            height: calc(100% - 60px);
-            z-index: 10;
+            height: calc(100% - 50px);
+            z-index: 9999;
             display: none;
-        }
-        .online-counter {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.7);
-            color: #fff;
-            padding: 8px 14px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            z-index: 100;
-            pointer-events: none;
-        }
-        .online-icon {
-            width: 8px;
-            height: 8px;
-            background-color: #22c55e;
-            border-radius: 50%;
         }
     </style>
 </head>
 <body>
 
 <div class="video-container">
-    <div class="online-counter">
-        <div class="online-icon"></div>
-        <span>Зрители: <span id="counter-value">1</span></span>
-    </div>
-
     <div id="blocker" class="click-blocker"></div>
-
-    <video id="my-video" controls autoplay muted></video>
+    
+    <video id="my-player" class="video-js vjs-default-skin vjs-big-play-centered"></video>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
-
-<script src="https://fastly.jsdelivr.net/gh/VideoTogether/VideoTogether@latest/release/extension.website.user.js"></script>
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
 
 <script>
-    // === НАСТРОЙКИ ===
-    const HLS_LINK = "https://vdbmate.org/14f1a60d66d41047774e17105dd7c712:2026060917:S05xQkplNGp4N1lZOWlTeGlWd2FreVlPeVpVVWtTWExjL1pGSnhqY21BZUUrOEdxVDFvSjdabW00cmVaRFRpYU1XOWUxdk1hR1gyejBBLzg5MFhqOEE9PQ==/1/4/7/4/5/2/3/i0er9.mp4:hls:manifest.m3u8";"; 
-    // =================
+    // === ВСТАВЬТЕ ССЫЛКУ СЮДА ===
+    const HLS_LINK = "https://vdbmate.org/14f1a60d66d41047774e17105dd7c712:2026060917:S05xQkplNGp4N1lZOWlTeGlWd2FreVlPeVpVVWtTWExjL1pGSnhqY21BZUUrOEdxVDFvSjdabW00cmVaRFRpYU1XOWUxdk1hR1gyejBBLzg5MFhqOEE9PQ==/1/4/7/4/5/2/3/i0er9.mp4:hls:manifest.m3u8"; 
+    // ===========================
 
-    const video = document.getElementById('my-video');
-
-    // Принудительный запуск HLS без лишних условий
-    if (Hls.isSupported()) {
-        const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true
-        });
-        hls.loadSource(HLS_LINK);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, function() {
-            console.log("HLS манифест успешно загружен");
-        });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Запасной вариант для Safari
-        video.src = HLS_LINK;
-    }
-
-    // Проверка прав
+    // Определяем роль (Админ или Зритель)
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('role') === 'admin';
 
-    if (!isAdmin) {
-        // Зритель: включаем защиту от кликов
-        document.getElementById('blocker').style.display = 'block';
-        
-        // Циклически отключаем кнопки, если плеер пытается их вернуть
-        setInterval(() => {
-            video.controls = false;
-        }, 500);
+    // Настройка интерфейса плеера
+    const playerOptions = {
+        controls: true, // Включаем кнопки по умолчанию
+        autoplay: false,
+        preload: 'auto',
+        fluid: false
+    };
 
-        window.addEventListener('keydown', function(e) {
-            if (e.code === 'Space') e.preventDefault();
-        }, true);
-    } else {
-        // Админ: кнопки всегда активны
-        video.controls = true;
-    }
+    // Инициализируем плеер
+    const player = videojs('my-player', playerOptions);
 
-    // Простой локальный счетчик онлайн (без падений внешних API)
-    function simulateOnline() {
-        const base = isAdmin ? 1 : 2;
-        document.getElementById('counter-value').innerText = base + Math.floor(Math.random() * 2);
-    }
-    setInterval(simulateOnline, 5000);
-    simulateOnline();
+    // Загружаем вашу HLS ссылку
+    player.src({
+        src: HLS_LINK,
+        type: 'application/x-mpegURL'
+    });
+
+    // Логика ограничений
+    player.ready(function() {
+        if (!isAdmin) {
+            // ЗРИТЕЛЬ: Включаем физический щит от кликов
+            document.getElementById('blocker').style.display = 'block';
+            
+            // Скрываем кнопку паузы и временную шкалу из панели управления плеера
+            if (player.controlBar.playToggle) player.controlBar.playToggle.hide();
+            if (player.controlBar.progressControl) player.controlBar.progressControl.hide();
+            
+            // Блокируем пробел
+            window.addEventListener('keydown', function(e) {
+                if (e.code === 'Space') e.preventDefault();
+            }, true);
+        }
+    });
 </script>
 
 </body>
