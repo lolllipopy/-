@@ -48,11 +48,7 @@
     currentHlsLink = url;
     player.src({ src: url, type: 'application/x-mpegURL' });
     
-    
-    const videoTag = document.querySelector('video');
-    videoTag.removeAttribute('src');
-    
-    videoTag.removeAttribute('data-setup');
+    document.querySelector('video').removeAttribute('src'); 
     
     if (forcePlay) player.play().catch(() => {}); else player.pause();
 	}
@@ -60,7 +56,6 @@
     document.querySelector('video').removeAttribute('src'); 
     
     if (forcePlay) player.play().catch(() => {}); else player.pause();
-	}
 	
     setInterval(() => {
         if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
