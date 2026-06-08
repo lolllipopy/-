@@ -44,12 +44,18 @@
         if (player.controlBar.progressControl) player.controlBar.progressControl.show();
     }
 
-	function changeStream(url, forcePlay) {
+	async function changeStream(url, forcePlay) {
     currentHlsLink = url;
-    player.src({ src: url, type: 'application/x-mpegURL' });
     
-    document.querySelector('video').removeAttribute('src'); 
+    const blob = new Blob([`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1280000\n${url}`], {type: 'application/vnd.apple.mpegurl'});
+    const blobUrl = URL.createObjectURL(blob);
     
+    player.src({ src: blobUrl, type: 'application/x-mpegURL' });
+    
+    // Принудительно очищаем все теги source, которые создает видео.js
+    const sources = document.querySelectorAll('source');
+    sources.forEach(s => s.remove());
+
     if (forcePlay) player.play().catch(() => {}); else player.pause();
 	}
     
