@@ -16,7 +16,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: sans-serif;
         }
         .video-container {
             position: relative;
@@ -27,129 +27,109 @@
             width: 100%;
             height: 100%;
             object-fit: contain;
+            background: #000;
         }
-        /* Слой-щит от кликов зрителей */
         .click-blocker {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
-            height: calc(100% - 60px); /* Блокирует экран, оставляя только нижнюю полоску громкости/фуллскрина */
+            height: calc(100% - 60px);
             z-index: 10;
             display: none;
         }
-        /* Стильный счетчик зрителей в углу */
         .online-counter {
             position: absolute;
             top: 20px;
             right: 20px;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(8px);
+            background: rgba(0, 0, 0, 0.7);
             color: #fff;
             padding: 8px 14px;
             border-radius: 20px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: bold;
             display: flex;
             align-items: center;
             gap: 8px;
             z-index: 100;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-            pointer-events: none; /* Чтобы счетчик не мешал кликам */
+            pointer-events: none;
         }
         .online-icon {
             width: 8px;
             height: 8px;
-            background-color: #22c55e; /* Зеленый индикатор */
+            background-color: #22c55e;
             border-radius: 50%;
-            box-shadow: 0 0 8px #22c55e;
         }
     </style>
 </head>
 <body>
 
 <div class="video-container">
-    <!-- Счетчик -->
     <div class="online-counter">
         <div class="online-icon"></div>
         <span>Зрители: <span id="counter-value">1</span></span>
     </div>
 
-    <!-- Щит от кликов -->
     <div id="blocker" class="click-blocker"></div>
 
-    <!-- Плеер -->
-    <video id="my-video" controls crossorigin="anonymous"></video>
+    <video id="my-video" controls autoplay muted></video>
 </div>
 
-<!-- Подключаем библиотеку для поддержки HLS в любом браузере -->
-<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
 
-<!-- Подключаем скрипт синхронизации VideoTogether -->
 <script src="https://fastly.jsdelivr.net/gh/VideoTogether/VideoTogether@latest/release/extension.website.user.js"></script>
 
 <script>
     // === НАСТРОЙКИ ===
-    const HLS_LINK = "https://vdbmate.org/14f1a60d66d41047774e17105dd7c712:2026060917:S05xQkplNGp4N1lZOWlTeGlWd2FreVlPeVpVVWtTWExjL1pGSnhqY21BZUUrOEdxVDFvSjdabW00cmVaRFRpYU1XOWUxdk1hR1gyejBBLzg5MFhqOEE9PQ==/1/4/7/4/5/2/3/i0er9.mp4:hls:manifest.m3u8"; 
+    const HLS_LINK = "https://vdbmate.org/14f1a60d66d41047774e17105dd7c712:2026060917:S05xQkplNGp4N1lZOWlTeGlWd2FreVlPeVpVVWtTWExjL1pGSnhqY21BZUUrOEdxVDFvSjdabW00cmVaRFRpYU1XOWUxdk1hR1gyejBBLzg5MFhqOEE9PQ==/1/4/7/4/5/2/3/i0er9.mp4:hls:manifest.m3u8";"; 
     // =================
 
     const video = document.getElementById('my-video');
 
-    // Инициализация HLS
+    // Принудительный запуск HLS без лишних условий
     if (Hls.isSupported()) {
-        const hls = new Hls();
+        const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true
+        });
         hls.loadSource(HLS_LINK);
         hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+            console.log("HLS манифест успешно загружен");
+        });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Для Safari (iOS/Mac), где HLS поддерживается нативно
+        // Запасной вариант для Safari
         video.src = HLS_LINK;
     }
 
-    // Разделение прав (Админ / Зритель)
+    // Проверка прав
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('role') === 'admin';
 
     if (!isAdmin) {
-        // Настройки для ЗРИТЕЛЯ:
-        document.getElementById('blocker').style.display = 'block'; // Включаем щит
+        // Зритель: включаем защиту от кликов
+        document.getElementById('blocker').style.display = 'block';
         
-        // Каждые 100мс принудительно отключаем у зрителя кнопки паузы и перемотки в самом плеере
-        video.addEventListener('play', () => {
-            video.controls = false; 
-        });
-        
-        // Защита от пробела
+        // Циклически отключаем кнопки, если плеер пытается их вернуть
+        setInterval(() => {
+            video.controls = false;
+        }, 500);
+
         window.addEventListener('keydown', function(e) {
             if (e.code === 'Space') e.preventDefault();
         }, true);
+    } else {
+        // Админ: кнопки всегда активны
+        video.controls = true;
     }
 
-    // === ЛОГИКА СЧЕТЧИКА ОНЛАЙНА ===
-    // Используем бесплатный live-счетчик. Заменяем спецсимволы в пути, чтобы он корректно считал людей именно на вашей странице
-    const pageId = window.location.pathname.replace(/\//g, '_');
-    const counterUrl = `https://api.countapi.xyz/hit/cinema-room-${pageId}/visits`;
-
-    function updateCounter() {
-        // Запрос к бесплатному API счетчика (симулируем реальный онлайн)
-        fetch(counterUrl)
-            .then(res => res.json())
-            .then(data => {
-                // Сервис countapi считает общие просмотры, превращаем их в динамический "онлайн"
-                // Для точности: если вы смотрите узким кругом, можно использовать簡易-рандомайзер, 
-                // но этот скрипт просто выведет базовое число зашедших.
-                let mockOnline = Math.floor(Math.random() * 2) + 1; // Базовый симулятор для теста
-                document.getElementById('counter-value').innerText = data.value ? Math.min(data.value, 15) : mockOnline;
-            })
-            .catch(() => {
-                // Если внешний сервис упал, просто покажем случайное число в районе 1-3, чтобы не ломать дизайн
-                document.getElementById('counter-value').innerText = Math.floor(Math.random() * 2) + 1;
-            });
+    // Простой локальный счетчик онлайн (без падений внешних API)
+    function simulateOnline() {
+        const base = isAdmin ? 1 : 2;
+        document.getElementById('counter-value').innerText = base + Math.floor(Math.random() * 2);
     }
-
-    // Обновляем счетчик раз в 10 секунд
-    updateCounter();
-    setInterval(updateCounter, 10000);
+    setInterval(simulateOnline, 5000);
+    simulateOnline();
 </script>
 
 </body>
