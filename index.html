@@ -126,9 +126,30 @@
         });
 
         // Отправка базовых команд управления
-        player.on('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
-        player.on('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
-        player.on('seeking', () => { connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() })); });
+        // Стало (умная синхронизация при перемотке):
+player.on('play', () => { 
+    connections.forEach(c => c.send({ action: 'play' })); 
+});
+
+player.on('pause', () => { 
+    connections.forEach(c => c.send({ action: 'pause' })); 
+});
+
+player.on('seeking', () => { 
+    // При перемотке принудительно ставим зрителей на паузу, чтобы они не пытались воспроизводить кашу
+    connections.forEach(c => c.send({ action: 'pause' }));
+    connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() })); 
+});
+
+player.on('seeked', () => {
+    // Как только вы закончили мотать и у вас видео готово, даем команду "старт" зрителям спустя небольшую паузу
+    setTimeout(() => {
+        connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() }));
+        if (!player.paused()) {
+            connections.forEach(c => c.send({ action: 'play' }));
+        }
+    }, 1000); // 1 секунда задержки, чтобы плееры зрителей успели подгрузить новые данные
+});
 
     } else {
         // Логика ЗРИТЕЛЯ (Автоподключение к вашей постоянной комнате)
