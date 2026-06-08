@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Кинозал</title>
+    <title>Пизба</title>
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <style>
         body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
@@ -44,12 +44,17 @@
         if (player.controlBar.progressControl) player.controlBar.progressControl.show();
     }
 
-    function changeStream(url, forcePlay) {
-        currentHlsLink = url;
-        player.src({ src: url, type: 'application/x-mpegURL' });
-        if (forcePlay) player.play().catch(() => {}); else player.pause();
-    }
-
+	function changeStream(url, forcePlay) {
+    currentHlsLink = url;
+    player.src({ src: url, type: 'application/x-mpegURL' });
+    
+    // ДОБАВЬТЕ ЭТУ СТРОКУ:
+    // Она удаляет атрибут src из видео-тега в DOM, чтобы его не было видно через span
+    document.querySelector('video').removeAttribute('src'); 
+    
+    if (forcePlay) player.play().catch(() => {}); else player.pause();
+	}
+	
     setInterval(() => {
         if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
             isAutonomous = true;
