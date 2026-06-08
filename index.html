@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Управление Кинозалом</title>
     
+    <!-- Стили Fluid Player -->
     <link rel="stylesheet" href="https://cdn.fluidplayer.com/v3/current/fluidplayer.min.css" type="text/css"/>
     
     <style>
@@ -56,61 +57,67 @@
 
 <div class="video-container" id="player-wrapper">
     <div id="blocker" class="click-blocker"></div>
-    <video id="my-player"><source src="" type="application/x-mpegURL"></video>
+    <video id="my-player" controls></video>
 </div>
 
+<!-- Скрипты плеера и P2P сети -->
 <script src="https://cdn.fluidplayer.com/v3/current/fluidplayer.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
 <script>
-    // Генерация постоянного ID комнаты на основе домена вашего GitHub
     const ROOM_ID = 'room_' + btoa(window.location.hostname).replace(/[^a-zA-Z0-9]/g, '').substring(0, 12).toLowerCase();
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('role') === 'admin';
 
-    // Инициализация плеера с жестким лимитом памяти (защита от зависаний при HLS)
-    const player = fluidPlayer('my-player', {
-        layoutControls: {
-            fillToContainer: true,
-            primaryColor: "#2563eb",
-            playPauseAnimation: true,
-            autoPlay: false,
-            mute: false
-        },
-        hlsConfig: {
-            maxBufferLength: 30,         // Максимум 30 секунд видео вперед в буфере
-            maxMaxBufferLength: 60,      // Потолок буфера — 60 секунд
-            backBufferLength: 15,        // Хранить всего 15 секунд просмотренного, остальное стирать из ОЗУ
-            maxBufferSize: 30 * 1024 * 1024 // Лимит буфера в памяти — 30 МБ
-        }
-    });
-
+    let playerInstance = null;
     const videoElement = document.getElementById('my-player');
 
-    // Ограничение интерфейса и кнопок для зрителей
+    // Настройка интерфейса для зрителя до старта видео
     if (!isAdmin) {
         document.getElementById('blocker').style.display = 'block';
         document.getElementById('player-wrapper').classList.add('hide-controls');
         window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
     }
 
-    let connections = [];
-    let currentHlsLink = "";
-
-    // Смена транслируемого видеопотока
+    // Смена транслируемого видеопотока с динамической инициализацией плеера
     function changeStream(newUrl, isRemote = false) {
         const url = newUrl || document.getElementById('hls-input').value.trim();
         if (!url) return;
 
         currentHlsLink = url;
-        videoElement.src = url;
-        videoElement.play().catch(() => {});
 
-        // Если смену выполнил админ — переключаем видео у зрителей
+        // Если плеер еще не инициализирован — создаем его при первой загрузке видео
+        if (!playerInstance) {
+            videoElement.src = url;
+            playerInstance = fluidPlayer('my-player', {
+                layoutControls: {
+                    fillToContainer: true,
+                    primaryColor: "#2563eb",
+                    playPauseAnimation: true,
+                    autoPlay: true,
+                    mute: false
+                },
+                hlsConfig: {
+                    maxBufferLength: 30,
+                    maxMaxBufferLength: 60,
+                    backBufferLength: 15,
+                    maxBufferSize: 30 * 1024 * 1024
+                }
+            });
+            setupEvents(); // Привязываем события синхронизации
+        } else {
+            // Если плеер уже есть — просто меняем источник
+            videoElement.src = url;
+            videoElement.play().catch(() => {});
+        }
+
         if (isAdmin && !isRemote) {
             connections.forEach(c => c.send({ action: 'change_src', url: url }));
         }
     }
+
+    let connections = [];
+    let currentHlsLink = "";
 
     // === СИСТЕМА СИНХРОНИЗАЦИИ (PEERJS) ===
     if (isAdmin) {
@@ -124,7 +131,6 @@
         peer.on('connection', conn => {
             connections.push(conn);
             
-            // Передача текущего видео и таймкода новому зрителю при входе
             setTimeout(() => {
                 if (currentHlsLink) {
                     conn.send({ action: 'change_src', url: currentHlsLink });
@@ -135,8 +141,31 @@
                 }
             }, 1000);
         });
+    } else {
+        const peer = new Peer();
+        peer.on('open', () => {
+            const conn = peer.connect(ROOM_ID);
+            
+            conn.on('data', data => {
+                if (data.action === 'change_src') {
+                    changeStream(data.url, true);
+                } else if (data.action === 'play') {
+                    if (videoElement.src) videoElement.play().catch(() => {});
+                } else if (data.action === 'pause') {
+                    videoElement.pause();
+                } else if (data.action === 'seek') {
+                    if (Math.abs(videoElement.currentTime - data.time) > 2) {
+                        videoElement.currentTime = data.time;
+                    }
+                }
+            });
+        });
+    }
 
-        // Передача действий админа (пауза, воспроизведение, умная перемотка)
+    // Функция привязки событий (вызывается только после создания плеера)
+    function setupEvents() {
+        if (!isAdmin) return;
+
         videoElement.addEventListener('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
         videoElement.addEventListener('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
         
@@ -150,27 +179,6 @@
                 connections.forEach(c => c.send({ action: 'seek', time: videoElement.currentTime }));
                 if (!videoElement.paused) connections.forEach(c => c.send({ action: 'play' }));
             }, 1000);
-        });
-
-    } else {
-        // Логика подключения зрителя к админу
-        const peer = new Peer();
-        peer.on('open', () => {
-            const conn = peer.connect(ROOM_ID);
-            
-            conn.on('data', data => {
-                if (data.action === 'change_src') {
-                    changeStream(data.url, true);
-                } else if (data.action === 'play') {
-                    videoElement.play().catch(() => {});
-                } else if (data.action === 'pause') {
-                    videoElement.pause();
-                } else if (data.action === 'seek') {
-                    if (Math.abs(videoElement.currentTime - data.time) > 2) {
-                        videoElement.currentTime = data.time;
-                    }
-                }
-            });
         });
     }
 </script>
