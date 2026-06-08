@@ -44,18 +44,18 @@
         if (player.controlBar.progressControl) player.controlBar.progressControl.show();
     }
 
-	async function changeStream(url, forcePlay) {
+	function changeStream(url, forcePlay) {
     currentHlsLink = url;
+    player.src({ src: url, type: 'application/x-mpegURL' });
     
-    const blob = new Blob([`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1280000\n${url}`], {type: 'application/vnd.apple.mpegurl'});
-    const blobUrl = URL.createObjectURL(blob);
+    // Скрываем все возможные элементы, где плеер мог оставить ссылку
+    const videoTag = document.querySelector('video');
+    videoTag.removeAttribute('src'); // Удаляем атрибут-источник
     
-    player.src({ src: blobUrl, type: 'application/x-mpegURL' });
+    // Принудительно удаляем все элементы с классом, содержащим ссылку
+    // Video.js часто добавляет её в атрибуты типа data-setup
+    videoTag.removeAttribute('data-setup');
     
-    // Принудительно очищаем все теги source, которые создает видео.js
-    const sources = document.querySelectorAll('source');
-    sources.forEach(s => s.remove());
-
     if (forcePlay) player.play().catch(() => {}); else player.pause();
 	}
     
