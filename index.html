@@ -5,15 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Управление Кинозалом</title>
     
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.fluidplayer.com/v3/current/fluidplayer.min.css" type="text/css"/>
     
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: sans-serif; }
         .video-container { width: 100%; height: 100%; position: relative; }
-        .video-js { width: 100% !important; height: 100% !important; }
+        video { width: 100% !important; height: 100% !important; }
         .click-blocker { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 50px); z-index: 999; display: none; }
         
-        /* Удобная панель управления для Админа сверху */
+        /* Панель Управления для Администратора */
         #admin-panel {
             position: absolute; top: 15px; left: 15px; 
             background: rgba(20, 20, 20, 0.9); border: 1px solid #333;
@@ -32,6 +32,9 @@
         }
         #admin-panel button:hover { background: #1d4ed8; }
         .panel-section { margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 10px; }
+        
+        /* Скрытие элементов управления плеера на экране зрителей */
+        .hide-controls .fluid_controls_container { display: none !important; }
     </style>
 </head>
 <body>
@@ -41,118 +44,116 @@
         <strong>Панель Управления</strong>
     </div>
     <div class="panel-section">
-        <label>1. Ссылка для ваших зрителей:</label>
+        <label>1. Постоянная ссылка для зрителей:</label>
         <input type="text" id="share-url" readonly onclick="this.select()">
     </div>
     <div>
         <label>2. Поставить новую HLS (.m3u8) ссылку:</label>
-        <input type="text" id="hls-input" placeholder="https://site.com/stream.m3u8">
+        <input type="text" id="hls-input" placeholder="Вставьте ссылку сюда">
         <button onclick="changeStream()">Обновить поток у всех</button>
     </div>
 </div>
 
-<div class="video-container">
+<div class="video-container" id="player-wrapper">
     <div id="blocker" class="click-blocker"></div>
-    <video id="my-player" class="video-js vjs-default-skin vjs-big-play-centered"></video>
+    <video id="my-player"><source src="" type="application/x-mpegURL"></video>
 </div>
 
-<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+<script src="https://cdn.fluidplayer.com/v3/current/fluidplayer.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
 <script>
-    // Генерация постоянного уникального ID комнаты на основе вашего домена GitHub
+    // Генерация постоянного ID комнаты на основе домена вашего GitHub
     const ROOM_ID = 'room_' + btoa(window.location.hostname).replace(/[^a-zA-Z0-9]/g, '').substring(0, 12).toLowerCase();
-
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('role') === 'admin';
 
-    // Базовый запуск пустого плеера
-    const player = videojs('my-player', { controls: true, autoplay: false, preload: 'auto' });
-
-    player.ready(function() {
-        if (!isAdmin) {
-            document.getElementById('blocker').style.display = 'block';
-            if (player.controlBar.playToggle) player.controlBar.playToggle.hide();
-            if (player.controlBar.progressControl) player.controlBar.progressControl.hide();
-            window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
+    // Инициализация плеера с жестким лимитом памяти (защита от зависаний при HLS)
+    const player = fluidPlayer('my-player', {
+        layoutControls: {
+            fillToContainer: true,
+            primaryColor: "#2563eb",
+            playPauseAnimation: true,
+            autoPlay: false,
+            mute: false
+        },
+        hlsConfig: {
+            maxBufferLength: 30,         // Максимум 30 секунд видео вперед в буфере
+            maxMaxBufferLength: 60,      // Потолок буфера — 60 секунд
+            backBufferLength: 15,        // Хранить всего 15 секунд просмотренного, остальное стирать из ОЗУ
+            maxBufferSize: 30 * 1024 * 1024 // Лимит буфера в памяти — 30 МБ
         }
     });
 
-    let connections = [];
-    let currentHlsLink = ""; // Переменная для хранения текущей ссылки
+    const videoElement = document.getElementById('my-player');
 
-    // Функция смены потока (вызывается кнопкой из UI)
+    // Ограничение интерфейса и кнопок для зрителей
+    if (!isAdmin) {
+        document.getElementById('blocker').style.display = 'block';
+        document.getElementById('player-wrapper').classList.add('hide-controls');
+        window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
+    }
+
+    let connections = [];
+    let currentHlsLink = "";
+
+    // Смена транслируемого видеопотока
     function changeStream(newUrl, isRemote = false) {
         const url = newUrl || document.getElementById('hls-input').value.trim();
         if (!url) return;
 
         currentHlsLink = url;
-        
-        // Меняем видео в плеере
-        player.src({ src: url, type: 'application/x-mpegURL' });
-        player.play().catch(() => {}); // Пытаемся запустить
+        videoElement.src = url;
+        videoElement.play().catch(() => {});
 
-        // Если это сделал админ, отправляем ссылку всем подключенным зрителям
+        // Если смену выполнил админ — переключаем видео у зрителей
         if (isAdmin && !isRemote) {
             connections.forEach(c => c.send({ action: 'change_src', url: url }));
         }
     }
 
+    // === СИСТЕМА СИНХРОНИЗАЦИИ (PEERJS) ===
     if (isAdmin) {
         document.getElementById('admin-panel').style.display = 'block';
-        
-        // Создаем постоянную комнату
         const peer = new Peer(ROOM_ID);
 
         peer.on('open', () => {
-            // Формируем постоянную красивую ссылку для зрителей
-            const shareUrl = window.location.origin + window.location.pathname;
-            document.getElementById('share-url').value = shareUrl;
+            document.getElementById('share-url').value = window.location.origin + window.location.pathname;
         });
 
         peer.on('connection', conn => {
             connections.push(conn);
             
-            // Если зритель зашел, а видео уже идет — сразу передаем ему текущую ссылку и таймкод
+            // Передача текущего видео и таймкода новому зрителю при входе
             setTimeout(() => {
                 if (currentHlsLink) {
                     conn.send({ action: 'change_src', url: currentHlsLink });
                     setTimeout(() => {
-                        conn.send({ action: 'seek', time: player.currentTime() });
-                        if (!player.paused()) conn.send({ action: 'play' });
-                    }, 1000);
+                        conn.send({ action: 'seek', time: videoElement.currentTime });
+                        if (!videoElement.paused) conn.send({ action: 'play' });
+                    }, 1500);
                 }
             }, 1000);
         });
 
-        // Отправка базовых команд управления
-        // Стало (умная синхронизация при перемотке):
-player.on('play', () => { 
-    connections.forEach(c => c.send({ action: 'play' })); 
-});
-
-player.on('pause', () => { 
-    connections.forEach(c => c.send({ action: 'pause' })); 
-});
-
-player.on('seeking', () => { 
-    // При перемотке принудительно ставим зрителей на паузу, чтобы они не пытались воспроизводить кашу
-    connections.forEach(c => c.send({ action: 'pause' }));
-    connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() })); 
-});
-
-player.on('seeked', () => {
-    // Как только вы закончили мотать и у вас видео готово, даем команду "старт" зрителям спустя небольшую паузу
-    setTimeout(() => {
-        connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() }));
-        if (!player.paused()) {
-            connections.forEach(c => c.send({ action: 'play' }));
-        }
-    }, 1000); // 1 секунда задержки, чтобы плееры зрителей успели подгрузить новые данные
-});
+        // Передача действий админа (пауза, воспроизведение, умная перемотка)
+        videoElement.addEventListener('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
+        videoElement.addEventListener('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
+        
+        videoElement.addEventListener('seeking', () => { 
+            connections.forEach(c => c.send({ action: 'pause' }));
+            connections.forEach(c => c.send({ action: 'seek', time: videoElement.currentTime })); 
+        });
+        
+        videoElement.addEventListener('seeked', () => {
+            setTimeout(() => {
+                connections.forEach(c => c.send({ action: 'seek', time: videoElement.currentTime }));
+                if (!videoElement.paused) connections.forEach(c => c.send({ action: 'play' }));
+            }, 1000);
+        });
 
     } else {
-        // Логика ЗРИТЕЛЯ (Автоподключение к вашей постоянной комнате)
+        // Логика подключения зрителя к админу
         const peer = new Peer();
         peer.on('open', () => {
             const conn = peer.connect(ROOM_ID);
@@ -161,12 +162,12 @@ player.on('seeked', () => {
                 if (data.action === 'change_src') {
                     changeStream(data.url, true);
                 } else if (data.action === 'play') {
-                    player.play();
+                    videoElement.play().catch(() => {});
                 } else if (data.action === 'pause') {
-                    player.pause();
+                    videoElement.pause();
                 } else if (data.action === 'seek') {
-                    if (Math.abs(player.currentTime() - data.time) > 2) {
-                        player.currentTime(data.time);
+                    if (Math.abs(videoElement.currentTime - data.time) > 2) {
+                        videoElement.currentTime = data.time;
                     }
                 }
             });
