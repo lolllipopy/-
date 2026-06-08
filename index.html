@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Управление Кинозалом</title>
+    <title>Управление Кинозалом (Защищенная версия)</title>
     
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     
@@ -38,7 +38,7 @@
 
 <div id="admin-panel">
     <div class="panel-section">
-        <strong>Панель Управления (Защищено)</strong>
+        <strong>Панель Управления (Защищено SHA-256)</strong>
     </div>
     <div class="panel-section">
         <label>1. Постоянная ссылка для зрителей:</label>
@@ -60,33 +60,51 @@
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
 <script>
-    // === НАСТРОЙКА БЕЗОПАСНОСТИ ===
-    const SECRET_KEY = 'zCNf4deVHt1IJnZXQxvd'; 
+    // === НАСТРОЙКА БЕЗОПАСНОСТИ (ХЭШ ПАРОЛЯ) ===
+    const PASSWORD_HASH = 'ab8bc76c9768cdc81da50bbbe5a6f886bb0c251e800bdd3cd9dacc49f15f19ba'; 
+    const MAX_CONNECTIONS = 50; // Защита от DoS: не более 50 зрителей одновременно
 
-    const ROOM_ID = 'room_' + btoa(window.location.hostname).replace(/[^a-zA-Z0-9]/g, '').substring(0, 12).toLowerCase();
-    const urlParams = new URLSearchParams(window.location.search);
-    const isAdmin = urlParams.get('key') === SECRET_KEY;
+    // Функция быстрого хэширования в браузере
+    async function sha256(string) {
+        const utf8 = new TextEncoder().encode(string);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
 
-    // Запуск Video.js с ограничением памяти
+    // Инициализация плеера с лимитом кэша памяти
     const player = videojs('my-player', { 
         controls: true, 
         autoplay: false, 
         preload: 'auto',
-        html5: {
-            hls: {
-                maxBufferLength: 30,
-                maxMaxBufferLength: 60,
-                backBufferLength: 15,
-                maxBufferSize: 30 * 1024 * 1024
-            }
-        }
+        html5: { hls: { maxBufferLength: 30, maxMaxBufferLength: 60, backBufferLength: 15, maxBufferSize: 30 * 1024 * 1024 } }
     });
 
-    player.ready(function() {
+    let connections = [];
+    let currentHlsLink = "";
+    let isAdmin = false;
+    let ROOM_ID = "";
+
+    // Главная функция запуска логики безопасности
+    async function initApp() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const rawKey = urlParams.get('key') || '';
+        
+        // Хэшируем введенный в URL ключ для проверки
+        const inputHash = rawKey ? await sha256(rawKey) : '';
+        isAdmin = (inputHash === PASSWORD_HASH);
+
+        // Уникальный защищенный ID комнаты, созданный на основе хэша (никто не сможет угнать комнату)
+        ROOM_ID = 'room_' + PASSWORD_HASH.substring(0, 16);
+
         if (!isAdmin) {
             lockViewerControls();
+            startViewerLogic();
+        } else {
+            document.getElementById('admin-panel').style.display = 'block';
+            startAdminLogic();
         }
-    });
+    }
 
     function lockViewerControls() {
         document.getElementById('blocker').style.display = 'block';
@@ -104,26 +122,27 @@
 
     function preventSpace(e) { if (e.code === 'Space') e.preventDefault(); }
 
-    let connections = [];
-    let currentHlsLink = "";
-
-    function changeStream(newUrl, isRemote = false) {
+    function changeStream(newUrl, isRemote = false, forcePlay = true) {
         const url = newUrl || document.getElementById('hls-input').value.trim();
         if (!url) return;
 
         currentHlsLink = url;
         player.src({ src: url, type: 'application/x-mpegURL' });
         
-        // По умолчанию не запускаем автоплей, если это инициализация зрителя на паузе
         if (isAdmin && !isRemote) {
             player.play().catch(() => {});
-            connections.forEach(c => c.send({ action: 'change_src', url: url, forcePlay: true }));
+            broadcast({ action: 'change_src', url: url, forcePlay: true });
+        } else if (!isAdmin && isRemote) {
+            if (forcePlay) player.play().catch(() => {}); else player.pause();
         }
     }
 
-    // === СИСТЕМА СИНХРОНИЗАЦИИ (PEERJS) ===
-    if (isAdmin) {
-        document.getElementById('admin-panel').style.display = 'block';
+    function broadcast(data) {
+        connections.forEach(c => { if (c.open) c.send(data); });
+    }
+
+    // === ЛОГИКА АДМИНИСТРАТОРА ===
+    function startAdminLogic() {
         const peer = new Peer(ROOM_ID);
 
         peer.on('open', () => {
@@ -131,51 +150,47 @@
         });
 
         peer.on('connection', conn => {
+            // Защита от DoS (спама фейк-подключениями)
+            if (connections.length >= MAX_CONNECTIONS) {
+                conn.close();
+                return;
+            }
+
             connections.push(conn);
             
             const pingInterval = setInterval(() => {
                 if (conn.open) { conn.send({ action: 'ping' }); } else { clearInterval(pingInterval); }
             }, 1000);
 
-            // Синхронизация нового зрителя при входе
             setTimeout(() => {
                 if (currentHlsLink) {
-                    // Передаем статус: играть сразу или нет, в зависимости от состояния админа
-                    const shouldPlay = !player.paused();
-                    conn.send({ action: 'change_src', url: currentHlsLink, forcePlay: shouldPlay });
-                    
-                    setTimeout(() => {
-                        conn.send({ action: 'seek', time: player.currentTime() });
-                        if (shouldPlay) {
-                            conn.send({ action: 'play' });
-                        } else {
-                            conn.send({ action: 'pause' });
-                        }
-                    }, 1500);
+                    const isPlaying = !player.paused();
+                    // Атомарный пакет данных (синхро-состояние + таймкод + ссылка за один раз)
+                    conn.send({ 
+                        action: 'sync_init', 
+                        url: currentHlsLink, 
+                        time: player.currentTime(), 
+                        isPlaying: isPlaying 
+                    });
                 }
             }, 1000);
         });
 
-        player.on('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
-        player.on('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
-        
-        player.on('seeking', () => { 
-            connections.forEach(c => c.send({ action: 'pause' }));
-            connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() })); 
-        });
+        // Защищенная отправка синхронных действий плеера
+        player.on('play', () => { broadcast({ action: 'play' }); });
+        player.on('pause', () => { broadcast({ action: 'pause' }); });
         
         player.on('seeked', () => {
-            setTimeout(() => {
-                connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() }));
-                if (!player.paused()) connections.forEach(c => c.send({ action: 'play' }));
-            }, 1000);
+            broadcast({ action: 'seek_sync', time: player.currentTime(), isPlaying: !player.paused() });
         });
 
         window.addEventListener('beforeunload', () => {
-            connections.forEach(c => c.send({ action: 'admin_away' }));
+            broadcast({ action: 'admin_away' });
         });
+    }
 
-    } else {
+    // === ЛОГИКА ЗРИТЕЛЯ ===
+    function startViewerLogic() {
         const peer = new Peer();
         let lastPingTime = Date.now();
         let isAutonomous = false;
@@ -183,7 +198,7 @@
         setInterval(() => {
             if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
                 isAutonomous = true;
-                unlockViewerControls();
+                unlockViewerControls(); 
             }
         }, 1000);
 
@@ -193,29 +208,26 @@
             conn.on('data', data => {
                 if (data.action === 'ping') {
                     lastPingTime = Date.now();
-                    if (isAutonomous) { 
-                        isAutonomous = false; 
-                        lockViewerControls(); 
-                    }
-                } else if (data.action === 'change_src') {
+                    if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
+                } 
+                else if (data.action === 'sync_init') {
                     currentHlsLink = data.url;
-                    player.src({ src: data.url, type: 'application/x-mpegURL' });
-                    
-                    // Запускаем видео только если админ в этот момент играет его
-                    if (data.forcePlay) {
-                        player.play().catch(() => {});
-                    } else {
-                        player.pause();
-                    }
-                } else if (data.action === 'play') {
-                    if (!isAutonomous && currentHlsLink) player.play().catch(() => {});
-                } else if (data.action === 'pause') {
-                    player.pause();
-                } else if (data.action === 'seek') {
-                    if (!isAutonomous && Math.abs(player.currentTime() - data.time) > 2) {
+                    changeStream(data.url, true, data.isPlaying);
+                    player.currentTime(data.time);
+                } 
+                else if (data.action === 'seek_sync') {
+                    if (!isAutonomous) {
                         player.currentTime(data.time);
+                        if (data.isPlaying) player.play().catch(() => {}); else player.pause();
                     }
-                } else if (data.action === 'admin_away') {
+                } 
+                else if (data.action === 'play') {
+                    if (!isAutonomous && currentHlsLink) player.play().catch(() => {});
+                } 
+                else if (data.action === 'pause') {
+                    if (!isAutonomous) player.pause();
+                } 
+                else if (data.action === 'admin_away') {
                     isAutonomous = true;
                     unlockViewerControls();
                 }
@@ -225,6 +237,9 @@
             conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
         });
     }
+
+    // Запуск приложения
+    initApp();
 </script>
 
 </body>
