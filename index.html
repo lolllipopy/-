@@ -4,246 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Кинозал</title>
-    
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
-    
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: sans-serif; }
-        .video-container { width: 100%; height: 100%; position: relative; }
-        .video-js { width: 100% !important; height: 100% !important; }
-        .click-blocker { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 50px); z-index: 999; display: none; }
-        
-        /* Стили панели (создается динамически только для админа) */
-        #admin-panel {
-            position: absolute; top: 15px; left: 15px; 
-            background: rgba(20, 20, 20, 0.9); border: 1px solid #333;
-            color: #fff; padding: 15px; border-radius: 8px; z-index: 1000; 
-            font-size: 13px; width: 320px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.8);
-        }
-        #admin-panel input { 
-            width: 100%; background: #111; color: #fff; 
-            border: 1px solid #444; padding: 6px; border-radius: 4px; 
-            margin-top: 5px; margin-bottom: 10px; box-sizing: border-box;
-        }
-        #admin-panel button {
-            background: #2563eb; color: #fff; border: none; 
-            padding: 7px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
-        }
-        #admin-panel button:hover { background: #1d4ed8; }
-        .panel-section { margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 10px; }
+        body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;font-family:sans-serif}
+        .video-container{width:100%;height:100%;position:relative}
+        .video-js{width:100%!important;height:100%!important}
+        .click-blocker{position:absolute;top:0;left:0;width:100%;height:calc(100% - 50px);z-index:999;display:none}
+        #admin-panel{position:absolute;top:15px;left:15px;background:rgba(20,20,20,.9);border:1px solid #333;color:#fff;padding:15px;border-radius:8px;z-index:1000;font-size:13px;width:320px;box-shadow:0 4px 20px rgba(0,0,0,.8)}
+        #admin-panel input{width:100%;background:#111;color:#fff;border:1px solid #444;padding:6px;border-radius:4px;margin-top:5px;margin-bottom:10px;box-sizing:border-box}
+        #admin-panel button{background:#2563eb;color:#fff;border:none;padding:7px 12px;border-radius:4px;cursor:pointer;font-weight:700}
+        #admin-panel button:hover{background:#1d4ed8}
+        .panel-section{margin-bottom:10px;border-bottom:1px solid #222;padding-bottom:10px}
     </style>
 </head>
 <body>
-
 <div class="video-container">
     <div id="blocker" class="click-blocker"></div>
     <video id="my-player" class="video-js vjs-default-skin vjs-big-play-centered"></video>
 </div>
-
 <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-
 <script>
-    // === НАСТРОЙКА БЕЗОПАСНОСТИ ===
-    const PASSWORD_HASH = 'ab8bc76c9768cdc81da50bbbe5a6f886bb0c251e800bdd3cd9dacc49f15f19ba'; 
-    const MAX_CONNECTIONS = 50; 
-
-    // Хэширование SHA-256
-    async function sha256(string) {
-        const utf8 = new TextEncoder().encode(string);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    // Запуск Video.js
-    const player = videojs('my-player', { 
-        controls: true, 
-        autoplay: false, 
-        preload: 'auto',
-        html5: {
-            hls: {
-                maxBufferLength: 30,
-                maxMaxBufferLength: 60,
-                backBufferLength: 15,
-                maxBufferSize: 30 * 1024 * 1024
-            }
-        }
-    });
-
-    let connections = [];
-    let currentHlsLink = "";
-    let isAdmin = false;
-    let ROOM_ID = "";
-
-    async function initApp() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const rawKey = urlParams.get('key') || '';
-        
-        const inputHash = rawKey ? await sha256(rawKey) : '';
-        isAdmin = (inputHash === PASSWORD_HASH);
-
-        ROOM_ID = 'room_' + PASSWORD_HASH.substring(0, 16);
-
-        if (!isAdmin) {
-            lockViewerControls();
-            startViewerLogic();
-        } else {
-            createAdminPanel();
-            startAdminLogic();
-        }
-    }
-
-    function lockViewerControls() {
-        document.getElementById('blocker').style.display = 'block';
-        if (player.controlBar.playToggle) player.controlBar.playToggle.hide();
-        if (player.controlBar.progressControl) player.controlBar.progressControl.hide();
-        window.addEventListener('keydown', preventSpace, true);
-    }
-
-    function unlockViewerControls() {
-        document.getElementById('blocker').style.display = 'none';
-        if (player.controlBar.playToggle) player.controlBar.playToggle.show();
-        if (player.controlBar.progressControl) player.controlBar.progressControl.show();
-        window.removeEventListener('keydown', preventSpace, true);
-    }
-
-    function preventSpace(e) { if (e.code === 'Space') e.preventDefault(); }
-
-    function createAdminPanel() {
-        const panel = document.createElement('div');
-        panel.id = 'admin-panel';
-        panel.innerHTML = `
-            <div class="panel-section"><strong>Панель Управления</strong></div>
-            <div class="panel-section">
-                <label>1. Ссылка для зрителей:</label>
-                <input type="text" id="share-url" readonly onclick="this.select()">
-            </div>
-            <div>
-                <label>2. Новая HLS (.m3u8) ссылка:</label>
-                <input type="text" id="hls-input" placeholder="Вставьте ссылку">
-                <button onclick="changeStream()">Обновить поток у всех</button>
-            </div>
-        `;
-        document.body.appendChild(panel);
-    }
-
-    function changeStream(newUrl, isRemote = false, forcePlay = true) {
-        const url = newUrl || document.getElementById('hls-input').value.trim();
-        if (!url) return;
-
-        currentHlsLink = url;
-        player.src({ src: url, type: 'application/x-mpegURL' });
-        
-        if (isAdmin && !isRemote) {
-            player.play().catch(() => {});
-            broadcast({ action: 'change_src', url: url, forcePlay: true });
-        } else if (!isAdmin && isRemote) {
-            if (forcePlay) player.play().catch(() => {}); else player.pause();
-        }
-    }
-
-    function broadcast(data) {
-        connections.forEach(c => { if (c.open) c.send(data); });
-    }
-
-    // === ЛОГИКА АДМИНИСТРАТОРА ===
-    function startAdminLogic() {
-        const peer = new Peer(ROOM_ID);
-
-        peer.on('open', () => {
-            document.getElementById('share-url').value = window.location.origin + window.location.pathname;
-        });
-
-        peer.on('connection', conn => {
-            if (connections.length >= MAX_CONNECTIONS) {
-                conn.close();
-                return;
-            }
-
-            connections.push(conn);
-            
-            const pingInterval = setInterval(() => {
-                if (conn.open) { conn.send({ action: 'ping' }); } else { clearInterval(pingInterval); }
-            }, 1000);
-
-            setTimeout(() => {
-                if (currentHlsLink) {
-                    const isPlaying = !player.paused();
-                    conn.send({ 
-                        action: 'sync_init', 
-                        url: currentHlsLink, 
-                        time: player.currentTime(), 
-                        isPlaying: isPlaying 
-                    });
-                }
-            }, 1000);
-        });
-
-        player.on('play', () => { broadcast({ action: 'play' }); });
-        player.on('pause', () => { broadcast({ action: 'pause' }); });
-        
-        player.on('seeked', () => {
-            broadcast({ action: 'seek_sync', time: player.currentTime(), isPlaying: !player.paused() });
-        });
-
-        window.addEventListener('beforeunload', () => {
-            broadcast({ action: 'admin_away' });
-        });
-    }
-
-    // === ЛОГИКА ЗРИТЕЛЯ ===
-    function startViewerLogic() {
-        const peer = new Peer();
-        let lastPingTime = Date.now();
-        let isAutonomous = false;
-
-        setInterval(() => {
-            if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
-                isAutonomous = true;
-                unlockViewerControls(); 
-            }
-        }, 1000);
-
-        peer.on('open', () => {
-            const conn = peer.connect(ROOM_ID);
-            
-            conn.on('data', data => {
-                if (data.action === 'ping') {
-                    lastPingTime = Date.now();
-                    if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
-                } 
-                else if (data.action === 'sync_init') {
-                    currentHlsLink = data.url;
-                    changeStream(data.url, true, data.isPlaying);
-                    player.currentTime(data.time);
-                } 
-                else if (data.action === 'seek_sync') {
-                    if (!isAutonomous) {
-                        player.currentTime(data.time);
-                        if (data.isPlaying) player.play().catch(() => {}); else player.pause();
-                    }
-                } 
-                else if (data.action === 'play') {
-                    if (!isAutonomous && currentHlsLink) player.play().catch(() => {});
-                } 
-                else if (data.action === 'pause') {
-                    if (!isAutonomous) player.pause();
-                } 
-                else if (data.action === 'admin_away') {
-                    isAutonomous = true;
-                    unlockViewerControls();
-                }
-            });
-
-            conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
-            conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
-        });
-    }
-
-    initApp();
+const _0x4f2c=['ab8bc76c9768cdc81da50bbbe5a6f886bb0c251e800bdd3cd9dacc49f15f19ba','room_','substring','key','my-player','blocker','none','playToggle','controlBar','hide','progressControl','addEventListener','keydown','show','removeEventListener','div','admin-panel','<div class="panel-section"><strong>Панель Управления</strong></div><div class="panel-section"><label>1. Ссылка для зрителей:</label><input type="text" id="share-url" readonly onclick="this.select()"></div><div><label>2. Новая HLS (.m3u8) ссылка:</label><input type="text" id="hls-input" placeholder="Вставьте ссылку"><button onclick="changeStream()">Обновить поток у всех</button></div>','hls-input','value','trim','application/x-mpegURL','src','play','change_src','pause','open','send','share-url','origin','pathname','close','connection','ping','sync_init','currentTime','paused','seek_sync','beforeunload','admin_away','connect','data','error'];(function(_0x2d3f1a,_0x4f2c12){const _0x1a2f4d=function(_0x3c2b1a){while(--_0x3c2b1a){_0x2d3f1a['push'](_0x2d3f1a['shift']());}};_0x1a2f4d(++_0x4f2c12);}(_0x4f2c,0x1a5));const _0x1a2f=function(_0x2d3f1a,_0x4f2c12){_0x2d3f1a=_0x2d3f1a-0x0;let _0x1a2f4d=_0x4f2c[_0x2d3f1a];return _0x1a2f4d;};const PASSWORD_HASH=_0x1a2f('0x0');const MAX_CONNECTIONS=0x32;async function sha256(_0x32ba0e){const _0x53463a=new TextEncoder()['encode'](_0x32ba0e),_0x3d0b2f=await crypto['subtle']['digest']('SHA-256',_0x53463a);return Array['from'](new Uint8Array(_0x3d0b2f))['map']((_0x55d491=>_0x55d491['toString'](0x10)['padStart'](0x2,'0')))['join']('');}const player=videojs(_0x1a2f('0x4'),{'controls':!![],'autoplay':![],'preload':'auto','html5':{'hls':{'maxBufferLength':0x1e,'maxMaxBufferLength':0x3c,'backBufferLength':0xf,'maxBufferSize':0x1e00000}}});let connections=[],currentHlsLink='',isAdmin=![],ROOM_ID='';async function initApp(){const _0x4d5b2c=new URLSearchParams(window['location']['search'])['get'](_0x1a2f('0x3'))||'';isAdmin=await sha256(_0x4d5b2c)===PASSWORD_HASH;ROOM_ID=_0x1a2f('0x1')+PASSWORD_HASH[_0x1a2f('0x2')](0x0,0x10);if(!isAdmin){lockViewerControls();startViewerLogic();}else{createAdminPanel();startAdminLogic();}}function lockViewerControls(){document['getElementById'](_0x1a2f('0x5'))['style']['display']='block';if(player[_0x1a2f('0x9')][_0x1a2f('0x8')])player[_0x1a2f('0x9')][_0x1a2f('0x8')][_0x1a2f('0xa')]();if(player[_0x1a2f('0x9')][_0x1a2f('0xb')])player[_0x1a2f('0x9')][_0x1a2f('0xb')][_0x1a2f('0xa')]();window[_0x1a2f('0xc')](_0x1a2f('0xd'),preventSpace,!![]);}function unlockViewerControls(){document['getElementById'](_0x1a2f('0x5'))['style']['display']=_0x1a2f('0x6');if(player[_0x1a2f('0x9')][_0x1a2f('0x8')])player[_0x1a2f('0x9')][_0x1a2f('0x8')][_0x1a2f('0xe')]();if(player[_0x1a2f('0x9')][_0x1a2f('0xb')])player[_0x1a2f('0x9')][_0x1a2f('0xb')][_0x1a2f('0xe')]();window[_0x1a2f('0xf')](_0x1a2f('0xd'),preventSpace,!![]);}function preventSpace(_0x1b1c34){if('Space'===_0x1b1c34['code'])_0x1b1c34['preventDefault']();}function createAdminPanel(){const _0x3e1a0b=document['createElement'](_0x1a2f('0x10'));_0x3e1a0b['id']=_0x1a2f('0x11');_0x3e1a0b['innerHTML']=_0x1a2f('0x12');document['body']['appendChild'](_0x3e1a0b);}function changeStream(_0x5b3a12,_0x4a123f=![],_0x2c13fa=!![]){const _0x14f2c1=_0x5b3a12||document['getElementById'](_0x1a2f('0x13'))[_0x1a2f('0x14')][_0x1a2f('0x15')]();if(!_0x14f2c1)return;currentHlsLink=_0x14f2c1;player['src']({'src':_0x14f2c1,'type':_0x1a2f('0x16')});if(isAdmin&&!_0x4a123f){player[_0x1a2f('0x18')]()['catch']((()=>{}));broadcast({'action':_0x1a2f('0x19'),'url':_0x14f2c1,'forcePlay':!![]});}else if(!isAdmin&&_0x4a123f){if(_0x2c13fa)player[_0x1a2f('0x18')]()['catch']((()=>{}));else player[_0x1a2f('0x1a')]();}}function broadcast(_0x553af2){connections['forEach']((_0x12fa4c=>{_0x12fa4c[_0x1a2f('0x1b')]&&_0x12fa4c[_0x1a2f('0x1c')](_0x553af2);}));}function startAdminLogic(){const _0x2b3c1a=new Peer(ROOM_ID);_0x2b3c1a['on'](_0x1a2f('0x1b'),(()=>{document['getElementById'](_0x1a2f('0x1d'))[_0x1a2f('0x14')]=window['location'][_0x1a2f('0x1e')]+window['location'][_0x1a2f('0x1f')];}));_0x2b3c1a['on'](_0x1a2f('0x21'),(_0x2b2c1a=>{if(connections['length']>=MAX_CONNECTIONS)return void _0x2b2c1a[_0x1a2f('0x20')]();connections['push'](_0x2b2c1a);const _0x5bc3fa=setInterval((()=>{_0x2b2c1a[_0x1a2f('0x1b')]?_0x2b2c1a[_0x1a2f('0x1c')]({'action':_0x1a2f('0x22')}):clearInterval(_0x5bc3fa);}),0x3e8);setTimeout((()=>{if(currentHlsLink){const _0x4d2b3a=!player[_0x1a2f('0x25')]();_0x2b2c1a[_0x1a2f('0x1c')]({'action':_0x1a2f('0x23'),'url':currentHlsLink,'time':player[_0x1a2f('0x24')](),'isPlaying':_0x4d2b3a});}}),0x3e8);}));player['on'](_0x1a2f('0x18'),(()=>{broadcast({'action':'play'});}));player['on'](_0x1a2f('0x1a'),(()=>{broadcast({'action':'pause'});}));player['on']('seeked',(()=>{broadcast({'action':_0x1a2f('0x26'),'time':player[_0x1a2f('0x24')](),'isPlaying':!player[_0x1a2f('0x25')]()});}));window[_0x1a2f('0xc')](_0x1a2f('0x27'),(()=>{broadcast({'action':_0x1a2f('0x28')});}));}function startViewerLogic(){const _0x1c3b2a=new Peer();let _0x4d3b2a=Date.now(),_0x5b2c3a=![];setInterval((()=>{currentHlsLink&&!_0x5b2c3a&&Date.now()-_0x4d3b2a>0xfa0&&(_0x5b2c3a=!![],unlockViewerControls());}),0x3e8);_0x1c3b2a['on'](_0x1a2f('0x1b'),(_0x15c3fa=>{const _0x2a3b4c=_0x15c3fa[_0x1a2f('0x29')](ROOM_ID);_0x2a3b4c['on'](_0x1a2f('0x2a'),(_0x35b2ca=>{if(_0x1a2f('0x22')===_0x35b2ca['action']){_0x4d3b2a=Date.now();if(_0x5b2c3a){_0x5b2c3a=![];lockViewerControls();}}else if(_0x1a2f('0x23')===_0x35b2ca['action']){currentHlsLink=_0x35b2ca['url'];changeStream(_0x35b2ca['url'],!![],_0x35b2ca['isPlaying']);player[_0x1a2f('0x24')](_0x35b2ca['time']);}else if(_0x1a2f('0x26')===_0x35b2ca['action']){if(!_0x5b2c3a){player[_0x1a2f('0x24')](_0x35b2ca['time']);if(_0x35b2ca['isPlaying'])player[_0x1a2f('0x18')]()['catch']((()=>{}));else player[_0x1a2f('0x1a')]();}}else if('play'===_0x35b2ca['action']){if(!_0x5b2c3a&&currentHlsLink)player[_0x1a2f('0x18')]()['catch']((()=>{}));}else if('pause'===_0x35b2ca['action']){if(!_0x5b2c3a)player[_0x1a2f('0x1a')]();}else if(_0x1a2f('0x28')===_0x35b2ca['action']){_0x5b2c3a=!![];unlockViewerControls();}}));_0x2a3b4c['on'](_0x1a2f('0x20'),(()=>{_0x5b2c3a=!![];unlockViewerControls();}));_0x2a3b4c['on'](_0x1a2f('0x2b'),(()=>_0x5b2c3a=!![],unlockViewerControls()));}));}initApp();
 </script>
-
 </body>
 </html>
