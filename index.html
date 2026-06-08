@@ -4,17 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Приватный Кинозал</title>
-    
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
-    
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; }
         .video-container { width: 100%; height: 100%; position: relative; }
         .video-js { width: 100% !important; height: 100% !important; }
         .click-blocker { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 50px); z-index: 999; display: none; }
         
-        /* Прячем всплывающее окно синхронизации, чтобы оно не мешало на экране */
-        #videoTogetherPanel { display: none !important; }
+        /* Жестко скрываем меню синхронизации от глаз зрителей и админа */
+        #videoTogetherPanel, .videoTogetherPanel, [id*="videoTogether"] { display: none !important; opacity: 0 !important; visibility: hidden !important; }
     </style>
 </head>
 <body>
@@ -31,31 +29,24 @@
     const HLS_LINK = "https://vdbmate.org/14f1a60d66d41047774e17105dd7c712:2026060917:S05xQkplNGp4N1lZOWlTeGlWd2FreVlPeVpVVWtTWExjL1pGSnhqY21BZUUrOEdxVDFvSjdabW00cmVaRFRpYU1XOWUxdk1hR1gyejBBLzg5MFhqOEE9PQ==/1/4/7/4/5/2/3/i0er9.mp4:hls:manifest.m3u8"; 
     // ===========================
 
-    // Автоматическая генерация имени комнаты на основе вашей ссылки, чтобы никто чужой не зашел
-    const ROOM_NAME = btoa(window.location.hostname).substring(0, 8);
-
-    // Настройки для скрипта синхронизации (встраиваем их ДО его загрузки)
-    window.videoTogetherExtensionTargetLang = "ru";
-    
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('role') === 'admin';
 
-    if (isAdmin) {
-        // Настройки для вас: автоматически создавать комнату ROOM_NAME без пароля
-        window.VideoTogetherArgs = {
-            RoomName: ROOM_NAME,
-            RoomPassword: "",
-            MuteInSync: false,
-            Role: "Host"
-        };
-    } else {
-        // Настройки для зрителя: автоматически подключаться к комнате ROOM_NAME
-        window.VideoTogetherArgs = {
-            RoomName: ROOM_NAME,
-            RoomPassword: "",
-            MuteInSync: false,
-            Role: "Guest"
-        };
+    // Если в ссылке еще нет параметров комнаты, мы принудительно перенаправляем браузер на правильную ссылку
+    if (!urlParams.get('videoTogetherRoomName')) {
+        const currentUrl = new URL(window.location.href);
+        // Задаем фиксированное имя комнаты (без пробелов и спецсимволов)
+        currentUrl.searchParams.set('videoTogetherRoomName', 'mysecretcinema');
+        currentUrl.searchParams.set('videoTogetherRoomPassword', '');
+        
+        if (isAdmin) {
+            currentUrl.searchParams.set('videoTogetherRole', 'Host');
+            currentUrl.searchParams.set('role', 'admin');
+        } else {
+            currentUrl.searchParams.set('videoTogetherRole', 'Guest');
+        }
+        // Перезагружаем страницу с правильными параметрами для скрипта
+        window.location.href = currentUrl.toString();
     }
 </script>
 
