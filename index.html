@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Приватный Кинозал</title>
+    <title>Управление Кинозалом</title>
     
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     
@@ -13,20 +13,42 @@
         .video-js { width: 100% !important; height: 100% !important; }
         .click-blocker { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 50px); z-index: 999; display: none; }
         
-        /* Информационная плашка для админа */
+        /* Удобная панель управления для Админа сверху */
         #admin-panel {
-            position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); 
-            color: #fff; padding: 10px; border-radius: 5px; z-index: 1000; display: none; font-size: 12px;
+            position: absolute; top: 15px; left: 15px; 
+            background: rgba(20, 20, 20, 0.9); border: 1px solid #333;
+            color: #fff; padding: 15px; border-radius: 8px; z-index: 1000; 
+            display: none; font-size: 13px; width: 320px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.8);
         }
-        #admin-panel input { width: 250px; background: #222; color: #fff; border: 1px solid #444; padding: 3px; }
+        #admin-panel input { 
+            width: 100%; background: #111; color: #fff; 
+            border: 1px solid #444; padding: 6px; border-radius: 4px; 
+            margin-top: 5px; margin-bottom: 10px; box-sizing: border-box;
+        }
+        #admin-panel button {
+            background: #2563eb; color: #fff; border: none; 
+            padding: 7px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
+        }
+        #admin-panel button:hover { background: #1d4ed8; }
+        .panel-section { margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 10px; }
     </style>
 </head>
 <body>
 
 <div id="admin-panel">
-    <div>Режим администратора</div>
-    <label>Ссылка для зрителей (скопируйте):</label><br>
-    <input type="text" id="share-url" readonly onclick="this.select()">
+    <div class="panel-section">
+        <strong>Панель Управления</strong>
+    </div>
+    <div class="panel-section">
+        <label>1. Ссылка для ваших зрителей:</label>
+        <input type="text" id="share-url" readonly onclick="this.select()">
+    </div>
+    <div>
+        <label>2. Поставить новую HLS (.m3u8) ссылку:</label>
+        <input type="text" id="hls-input" placeholder="https://site.com/stream.m3u8">
+        <button onclick="changeStream()">Обновить поток у всех</button>
+    </div>
 </div>
 
 <div class="video-container">
@@ -35,23 +57,18 @@
 </div>
 
 <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
 <script>
-    // === ВСТАВЬТЕ ССЫЛКУ СЮДА ===
-    const HLS_LINK = "https://vdbmate.org/14f1a60d66d41047774e17105dd7c712:2026060917:S05xQkplNGp4N1lZOWlTeGlWd2FreVlPeVpVVWtTWExjL1pGSnhqY21BZUUrOEdxVDFvSjdabW00cmVaRFRpYU1XOWUxdk1hR1gyejBBLzg5MFhqOEE9PQ==/1/4/7/4/5/2/3/i0er9.mp4:hls:manifest.m3u8"; 
-    // ===========================
+    // Генерация постоянного уникального ID комнаты на основе вашего домена GitHub
+    const ROOM_ID = 'room_' + btoa(window.location.hostname).replace(/[^a-zA-Z0-9]/g, '').substring(0, 12).toLowerCase();
 
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('role') === 'admin';
-    const hostId = urlParams.get('room'); // ID комнаты для зрителя
 
-    // Инициализация плеера
+    // Базовый запуск пустого плеера
     const player = videojs('my-player', { controls: true, autoplay: false, preload: 'auto' });
-    player.src({ src: HLS_LINK, type: 'application/x-mpegURL' });
 
-    // Настройка прав
     player.ready(function() {
         if (!isAdmin) {
             document.getElementById('blocker').style.display = 'block';
@@ -61,49 +78,72 @@
         }
     });
 
-    // === СИСТЕМА СИНХРОНИЗАЦИИ (PEERJS) ===
     let connections = [];
+    let currentHlsLink = ""; // Переменная для хранения текущей ссылки
+
+    // Функция смены потока (вызывается кнопкой из UI)
+    function changeStream(newUrl, isRemote = false) {
+        const url = newUrl || document.getElementById('hls-input').value.trim();
+        if (!url) return;
+
+        currentHlsLink = url;
+        
+        // Меняем видео в плеере
+        player.src({ src: url, type: 'application/x-mpegURL' });
+        player.play().catch(() => {}); // Пытаемся запустить
+
+        // Если это сделал админ, отправляем ссылку всем подключенным зрителям
+        if (isAdmin && !isRemote) {
+            connections.forEach(c => c.send({ action: 'change_src', url: url }));
+        }
+    }
 
     if (isAdmin) {
         document.getElementById('admin-panel').style.display = 'block';
         
-        // Создаем случайный ID комнаты на основе времени
-        const roomId = 'room_' + Math.floor(Math.random() * 900000 + 100000);
-        const peer = new Peer(roomId);
+        // Создаем постоянную комнату
+        const peer = new Peer(ROOM_ID);
 
         peer.on('open', () => {
-            const shareUrl = window.location.origin + window.location.pathname + '?room=' + roomId;
+            // Формируем постоянную красивую ссылку для зрителей
+            const shareUrl = window.location.origin + window.location.pathname;
             document.getElementById('share-url').value = shareUrl;
         });
 
-        // Слушаем подключение зрителей
         peer.on('connection', conn => {
             connections.push(conn);
-            // При подключении нового зрителя сразу отправляем ему текущее время видео
+            
+            // Если зритель зашел, а видео уже идет — сразу передаем ему текущую ссылку и таймкод
             setTimeout(() => {
-                conn.send({ action: 'seek', time: player.currentTime() });
-                if (!player.paused()) conn.send({ action: 'play' });
+                if (currentHlsLink) {
+                    conn.send({ action: 'change_src', url: currentHlsLink });
+                    setTimeout(() => {
+                        conn.send({ action: 'seek', time: player.currentTime() });
+                        if (!player.paused()) conn.send({ action: 'play' });
+                    }, 1000);
+                }
             }, 1000);
         });
 
-        // Отправка команд всем зрителям при действиях админа
+        // Отправка базовых команд управления
         player.on('play', () => { connections.forEach(c => c.send({ action: 'play' })); });
         player.on('pause', () => { connections.forEach(c => c.send({ action: 'pause' })); });
         player.on('seeking', () => { connections.forEach(c => c.send({ action: 'seek', time: player.currentTime() })); });
 
-    } else if (hostId) {
-        // Логика для ЗРИТЕЛЯ: подключаемся к админу
+    } else {
+        // Логика ЗРИТЕЛЯ (Автоподключение к вашей постоянной комнате)
         const peer = new Peer();
         peer.on('open', () => {
-            const conn = peer.connect(hostId);
+            const conn = peer.connect(ROOM_ID);
             
             conn.on('data', data => {
-                if (data.action === 'play') {
+                if (data.action === 'change_src') {
+                    changeStream(data.url, true);
+                } else if (data.action === 'play') {
                     player.play();
                 } else if (data.action === 'pause') {
                     player.pause();
                 } else if (data.action === 'seek') {
-                    // Избегаем зацикливания перемещения
                     if (Math.abs(player.currentTime() - data.time) > 2) {
                         player.currentTime(data.time);
                     }
