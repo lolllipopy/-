@@ -2,191 +2,140 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kino</title>
-    <!-- Подключение необходимых библиотек -->
+    <title>Кино</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        body { margin: 0; background: #000; overflow: hidden; }
         #video-container { position: relative; width: 100vw; height: 100vh; }
-        video { width: 100%; height: 100%; object-fit: contain; }
-        
-        /* Блокировщик интерфейса для зрителя [1] */
-        #blocker {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0); z-index: 10; display: none;
-        }
-
-        /* Кнопка включения звука [1] */
-        #unmuteBtn {
+        video { width: 100%; height: 100%; }
+        #blocker { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: none; background: rgba(0,0,0,0); }
+        #unmuteBtn { 
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            padding: 20px 40px; font-size: 20px; cursor: pointer; z-index: 20;
-            background: #fff; border: none; border-radius: 5px; display: block;
+            padding: 15px 30px; z-index: 20; cursor: pointer; display: block; 
         }
     </style>
 </head>
 <body>
 
-    <div id="video-container">
-        <div id="blocker"></div>
-        <button id="unmuteBtn">ВКЛЮЧИТЬ ЗВУК</button>
-        <video id="video" playsinline></video>
-    </div>
+<div id="video-container">
+    <div id="blocker"></div>
+    <button id="unmuteBtn">ВКЛЮЧИТЬ ЗВУК</button>
+    <!-- Видео ОБЯЗАТЕЛЬНО muted для работы автоплея -->
+    <video id="video" playsinline muted></video>
+</div>
 
-    <script>
-        // Конфигурация
-        const ROOM_ID = 'pizba'; // Укажите здесь ID админа из PeerJS
-        
-        // Глобальные переменные из ваших источников [1, 4]
-        let hls;
-        let currentHlsLink = null;
-        let isAutonomous = true; 
-        let peerConn = null;
-        let lastPingTime = Date.now();
+<script>
+// ВАЖНО: Укажите здесь ID вашей админки
+const ROOM_ID = 'pizba'; 
 
-        const video = document.getElementById('video'); 
-        const unmuteBtn = document.getElementById('unmuteBtn'); 
+let hls;
+let currentHlsLink = null;
+let isAutonomous = true; 
+let peerConn = null;
 
-        // Функции управления доступом [1]
-        function lockViewerControls() { 
-            document.getElementById('blocker').style.display = 'block'; 
-            video.controls = false; 
-        }
+const video = document.getElementById('video');
+const unmuteBtn = document.getElementById('unmuteBtn');
 
-        function unlockViewerControls() { 
-            document.getElementById('blocker').style.display = 'none'; 
-            video.controls = true; 
-        }
+function lockViewerControls() { 
+    document.getElementById('blocker').style.display = 'block'; 
+    video.controls = false; 
+}
 
-        // Обработка звука [1]
-        unmuteBtn.addEventListener('click', async () => { 
-            try { 
-                video.muted = false; 
-                video.volume = 1;
-                unmuteBtn.style.display = 'none';
-            } catch (e) {
-                console.error("Ошибка активации звука:", e);
+function unlockViewerControls() { 
+    document.getElementById('blocker').style.display = 'none'; 
+    video.controls = true; 
+}
+
+// 1. ИСПРАВЛЕНИЕ: Кнопка звука теперь реально нужна
+unmuteBtn.addEventListener('click', () => { 
+    video.muted = false; 
+    video.volume = 1;
+    unmuteBtn.style.display = 'none';
+});
+
+function changeStream(url, forcePlay = true) { 
+    currentHlsLink = url; 
+    video.pause(); 
+
+    if (hls) { 
+        hls.destroy(); 
+        hls = null; 
+    } 
+
+    video.removeAttribute('src'); 
+    video.load();
+
+    if (Hls.isSupported()) { 
+        hls = new Hls({ debug: false, lowLatencyMode: true }); 
+        hls.loadSource(url); 
+        hls.attachMedia(video); 
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => { 
+            // Видео всегда стартует muted, чтобы автоплей не блокировался
+            video.muted = true; 
+            if (forcePlay) {
+                video.play().catch(() => {
+                    unmuteBtn.style.display = 'block';
+                });
             }
-        });
-
-        // Функция смены потока с защитой от утечек памяти [1, 2]
-        function changeStream(url, forcePlay = true) { 
-            currentHlsLink = url; 
-            unmuteBtn.style.display = 'block'; 
-            video.pause(); 
-
-            // Очистка предыдущего экземпляра [1]
-            if (hls) { 
-                hls.destroy(); 
-                hls = null; 
-            } 
-
-            video.removeAttribute('src'); 
-            video.load();
-
-            if (Hls.isSupported()) { 
-                hls = new Hls({ debug: false, lowLatencyMode: true }); 
-                hls.loadSource(url); 
-                hls.attachMedia(video); 
-
-                hls.on(Hls.Events.MANIFEST_PARSED, () => { 
-                    if (forcePlay) {
-                        video.play().catch(() => {
-                            unmuteBtn.style.display = 'block';
-                        }); 
-                    }
-                }); 
-
-                // Обработка фатальных ошибок [2]
-                hls.on(Hls.Events.ERROR, (event, data) => { 
-                    if (data.fatal) { 
-                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            hls.startLoad();
-                        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                            hls.recoverMediaError();
-                        } else {
-                            // Если восстановиться не удалось, полный перезапуск [2]
-                            hls.destroy();
-                            restartCurrentStream();
-                        }
-                    } 
-                }); 
-            } 
-            else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // Нативная поддержка (Safari) [2]
-                video.src = url;
-                video.addEventListener('loadedmetadata', () => { 
-                    if (forcePlay) { 
-                        video.play().catch(() => { 
-                            unmuteBtn.style.display = 'block'; 
-                        }); 
-                    } 
-                }, { once: true });
-            }
-        }
-
-        // Исправленная функция перезапуска (в источнике [3] была пустой)
-        function restartCurrentStream() { 
-            if (!isAutonomous || !currentHlsLink) return; 
-            console.log("Восстановление потока...");
-            changeStream(currentHlsLink, true);
-        }
-
-        // Контроль зависаний [3]
-        setInterval(() => { 
-            if (isAutonomous && currentHlsLink && !video.paused && video.readyState < 3) { 
-                console.log("Autonomous: Video stalled. Restarting..."); 
-                restartCurrentStream(); 
-            } 
-        }, 10000);
-
-        // Работа с фоновым режимом [3]
-        document.addEventListener("visibilitychange", () => { 
-            if (!document.hidden && isAutonomous && currentHlsLink) { 
-                setTimeout(() => { 
-                    video.play().catch(() => {
-                        unmuteBtn.style.display = 'block';
-                    }); 
-                }, 300); 
-            } 
-        });
-
-        // Восстановление сети [4]
-        window.addEventListener('online', () => { 
-            if (currentHlsLink) { 
-                changeStream(currentHlsLink, true); 
-            } 
-        });
-
-        // Инициализация PeerJS [4]
-        lockViewerControls(); 
-        const peer = new Peer({ 
-            config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } 
         }); 
 
-        peer.on('open', () => { 
-            peerConn = peer.connect(ROOM_ID, { reliable: true }); 
-            
-            peerConn.on('open', () => { 
-                console.log('Connected to admin'); 
-            }); 
-
-            peerConn.on('data', data => { 
-                lastPingTime = Date.now(); 
-                if (isAutonomous) { 
-                    isAutonomous = false; 
-                    lockViewerControls(); 
-                }
-                if (data.url) changeStream(data.url);
-            });
-        });
-
-        peer.on('error', () => { 
-            isAutonomous = true; 
-            unlockViewerControls(); 
-            if (currentHlsLink) restartCurrentStream();
+        hls.on(Hls.Events.ERROR, (event, data) => { 
+            if (data.fatal) { 
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+                else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+                else restartCurrentStream();
+            } 
         }); 
-    </script>
+    }
+}
+
+// 2. ИСПРАВЛЕНИЕ: Функция перезапуска теперь имеет тело (из ваших источников [3])
+function restartCurrentStream() { 
+    if (!isAutonomous || !currentHlsLink) return; 
+    console.log("Восстановление потока...");
+    changeStream(currentHlsLink, true);
+}
+
+// Контроль зависаний [3]
+setInterval(() => { 
+    if (isAutonomous && currentHlsLink && !video.paused && video.readyState < 3) { 
+        restartCurrentStream(); 
+    } 
+}, 10000);
+
+// Инициализация связи
+lockViewerControls(); 
+const peer = new Peer(); 
+
+peer.on('open', () => { 
+    peerConn = peer.connect(ROOM_ID, { reliable: true }); 
+    
+    peerConn.on('open', () => { 
+        console.log('Connected to admin'); 
+    }); 
+
+    // 3. ИСПРАВЛЕНИЕ: Теперь данные от админа управляют плеером
+    peerConn.on('data', data => { 
+        if (isAutonomous) { 
+            isAutonomous = false; 
+            lockViewerControls(); 
+        }
+
+        // Если админ прислал новую ссылку — меняем поток
+        if (data && data.url) {
+            console.log("Команда от админа: новая ссылка", data.url);
+            changeStream(data.url);
+        }
+    });
+});
+
+peer.on('error', () => { 
+    isAutonomous = true; 
+    unlockViewerControls(); 
+    if (currentHlsLink) restartCurrentStream();
+}); 
+</script>
 </body>
 </html>
