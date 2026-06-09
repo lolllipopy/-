@@ -17,12 +17,17 @@
     <video id="my-player" controls></video>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
     const ROOM_ID = 'pizba'; 
     const video = document.getElementById('my-player');
-    let hls = new Hls();
+    let hls = new Hls({
+    debug: false,                
+    maxBufferLength: 30,         
+    maxMaxBufferLength: 60,
+    maxBufferSize: 20 * 1024 * 1024 
+});
 
     let currentHlsLink = "";
     let lastPingTime = Date.now();
