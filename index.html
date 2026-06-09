@@ -7,7 +7,7 @@
 <style>
 body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
 .video-container{width:100%;height:100%;position:relative}
-#my-player{width:100%;height:100%;display:block;object-fit:contain}
+#my-player{width:100%;height:100%;display:block;object-fit:contain;background:black}
 .click-blocker{position:absolute;top:0;left:0;width:100%;height:100%;z-index:999;display:none}
 #unmute-btn {
     position: absolute;
@@ -32,18 +32,7 @@ body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overfl
 <div class="video-container">
     <div id="blocker" class="click-blocker"></div>
     <button id="unmute-btn">🔊 ВКЛЮЧИТЬ ЗВУК</button>
-    <video
-    id="my-player"
-    autoplay
-    muted
-    playsinline
-    webkit-playsinline
-    x-webkit-airplay="allow"
-    preload="auto"
-    crossorigin="anonymous"
-    disablepictureinpicture
-    style="width:100%;height:100%;background:black;"
-></video>
+    <video id="my-player" autoplay muted playsinline webkit-playsinline x-webkit-airplay="allow" preload="auto" crossorigin="anonymous" disablepictureinpicture></video>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -70,139 +59,121 @@ function unlockViewerControls() {
 unmuteBtn.addEventListener('click', async () => {
     try {
         video.muted = false;
-        video.volume = 1;
-
+        video.volume = 1.0;
         await video.play();
-
         unmuteBtn.style.display = 'none';
-    } catch (e) {
-        console.error(e);
-    }
+    } catch (e) { console.error(e); }
 });
+
+function destroyPlayer() {
+    if(hls){ hls.destroy(); hls = null; }
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+}
 
 function changeStream(url, forcePlay = true) {
     currentHlsLink = url;
     unmuteBtn.style.display = 'block';
-    video.pause();
-    if (hls) { hls.destroy(); hls = null; }
-    video.removeAttribute('src');
-    video.load();
+    destroyPlayer();
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    if(video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = url;
-
-video.addEventListener('loadedmetadata', () => {
-    if (forcePlay) {
-        video.play().catch(() => {
-            unmuteBtn.style.display = 'block';
-        });
-    }
-}, { once: true });
-
-video.load();
-    } else if (Hls.isSupported()) {
+        video.addEventListener('loadedmetadata', () => {
+            if(forcePlay) video.play().catch(() => { unmuteBtn.style.display = 'block'; });
+        }, {once:true});
+        video.load();
+    } else if(Hls.isSupported()) {
         hls = new Hls({
-    debug: false,
-    lowLatencyMode: true,
-
-    backBufferLength: 30,
-
-    maxBufferLength: 15,
-    maxMaxBufferLength: 30,
-
-    liveSyncDurationCount: 3,
-    liveMaxLatencyDurationCount: 10,
-
-    manifestLoadingRetryDelay: 1000,
-    levelLoadingRetryDelay: 1000,
-    fragLoadingRetryDelay: 1000,
-
-    manifestLoadingMaxRetry: 10,
-    levelLoadingMaxRetry: 10,
-    fragLoadingMaxRetry: 10
-});
+            debug: false,
+            lowLatencyMode: true,
+            backBufferLength: 30,
+            maxBufferLength: 15,
+            maxMaxBufferLength: 30,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 10,
+            manifestLoadingRetryDelay: 1000,
+            levelLoadingRetryDelay: 1000,
+            fragLoadingRetryDelay: 1000,
+            manifestLoadingMaxRetry: 10,
+            levelLoadingMaxRetry: 10,
+            fragLoadingMaxRetry: 10
+        });
         hls.loadSource(url);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            if (forcePlay) video.play().catch(() => {});
+            if(forcePlay) video.play().catch(() => { unmuteBtn.style.display = 'block'; });
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
-            if (data.fatal) {
-                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-                else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+            if(data.fatal){
+                if(data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+                else if(data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
                 else {
-    hls.destroy();
-
-    setTimeout(() => {
-        if (currentHlsLink) {
-            changeStream(currentHlsLink, true);
-        }
-    }, 3000);
-}
+                    destroyPlayer();
+                    if(isAutonomous) setTimeout(() => { changeStream(currentHlsLink,true); }, 3000);
+                }
             }
         });
     }
 }
 
+// Синхронизация с админом
 setInterval(() => {
-    if (
-        !video.paused &&
-        video.readyState < 3 &&
-        currentHlsLink
-    ) {
-        changeStream(currentHlsLink, true);
+    if(currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 5000)) {
+        isAutonomous = true;
+        unlockViewerControls();
     }
-}, 10000);
+}, 1000);
+
+// Автовоспроизведение/восстановление потока только в автономном режиме
+setInterval(() => {
+    if(isAutonomous && currentHlsLink && !video.paused && video.readyState < 3){
+        console.log("Autonomous: Video stalled. Restarting...");
+        changeStream(currentHlsLink,true);
+    }
+},10000);
 
 document.addEventListener('visibilitychange', () => {
-    if (
-        !document.hidden &&
-        currentHlsLink
-    ) {
-        setTimeout(() => {
-            video.play().catch(() => {});
-        }, 300);
+    if(!document.hidden && isAutonomous && currentHlsLink){
+        setTimeout(()=>{ video.play().catch(()=>{}); },300);
     }
 });
 
 window.addEventListener('online', () => {
-    if (currentHlsLink) {
-        changeStream(currentHlsLink, true);
-    }
+    if(isAutonomous && currentHlsLink) changeStream(currentHlsLink,true);
 });
 
 lockViewerControls();
 
 const peer = new Peer({ config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+
 peer.on('open', () => {
     peerConn = peer.connect(ROOM_ID, { reliable: true });
-    peerConn.on('open', () => {
-        console.log('Connected to admin');
-    });
+    peerConn.on('open', () => { console.log('Connected to admin'); });
     peerConn.on('data', data => {
         lastPingTime = Date.now();
-        if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
-        
-        if (data.action === 'sync_init' || data.action === 'change_src') {
-            changeStream(data.url, data.forcePlay || data.isPlaying);
-            if (data.time !== undefined) setTimeout(() => { video.currentTime = data.time; }, 100);
+        if(isAutonomous){ isAutonomous=false; lockViewerControls(); }
+
+        if(data.action==='sync_init' || data.action==='change_src'){
+            changeStream(data.url,data.forcePlay||data.isPlaying);
+            if(data.time!==undefined) setTimeout(()=>{ video.currentTime=data.time; },100);
         }
-        else if (data.action === 'seek_sync') {
-            if (!isAutonomous) {
+        else if(data.action==='seek_sync'){
+            if(!isAutonomous){
                 video.currentTime = data.time;
-                if (data.isPlaying) video.play().catch(() => {});
-                else video.pause();
+                if(data.isPlaying) video.play().catch(()=>{}); else video.pause();
             }
         }
-        else if (data.action === 'play') { if (!isAutonomous) video.play().catch(() => {}); }
-        else if (data.action === 'pause') { if (!isAutonomous) video.pause(); }
-        else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
+        else if(data.action==='play'){ if(!isAutonomous) video.play().catch(()=>{}); }
+        else if(data.action==='pause'){ if(!isAutonomous) video.pause(); }
+        else if(data.action==='admin_away'){ isAutonomous=true; unlockViewerControls(); }
     });
-    peerConn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
-    peerConn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
+    peerConn.on('close',()=>{ isAutonomous=true; unlockViewerControls(); });
+    peerConn.on('error',()=>{ isAutonomous=true; unlockViewerControls(); });
 });
 
-peer.on('error', () => { isAutonomous = true; unlockViewerControls(); });
+peer.on('error',()=>{ isAutonomous=true; unlockViewerControls(); });
+
 </script>
 </body>
 </html>
