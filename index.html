@@ -8,13 +8,13 @@
 body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
 .video-container{width:100%;height:100%;position:relative}
 #my-player{width:100%;height:100%;display:block;object-fit:contain}
-.click-blocker{position:absolute;top:0;left:0;width:100%;height:100%;z-index:999;display:none}
+.click-blocker{position:absolute;top:0;left:0;width:100%;height:calc(100% - 50px);z-index:999;display:none}
 </style>
 </head>
 <body>
 <div class="video-container">
 <div id="blocker" class="click-blocker"></div>
-<!-- КРИТИЧНО ДЛЯ SAFARI: muted playsinline webkit-playsinline -->
+<!-- ДОБАВЛЕНО: muted playsinline webkit-playsinline для мобильных -->
 <video id="my-player" controls autoplay muted playsinline webkit-playsinline x5-playsinline></video>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
@@ -22,7 +22,7 @@ body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overfl
 <script>
 const ROOM_ID = 'pizba';
 const video = document.getElementById('my-player');
-let hls = null; // Инициализируем как null, а не new Hls()
+let hls = null; // ИСПРАВЛЕНО: не создаем экземпляр сразу
 let currentHlsLink = "";
 let lastPingTime = Date.now();
 let isAutonomous = false;
@@ -41,26 +41,25 @@ function unlockViewerControls() {
 function changeStream(url, forcePlay) {
     currentHlsLink = url;
     
-    // Полная очистка перед сменой источника
+    // Сброс предыдущего состояния
     if (hls) {
         hls.destroy();
         hls = null;
     }
     video.pause();
-    video.removeAttribute('src');
+    video.removeAttribute('src'); 
     video.load();
 
-    // ПРОВЕРКА: Если это Safari (iOS/macOS), используем ТОЛЬКО нативный плеер
+    // ПРОВЕРКА: Если это Apple (iPad/iPhone), используем ТОЛЬКО нативный плеер
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = url;
-        // На Safari нужно ждать loadedmetadata, иначе play() может не сработать
         video.addEventListener('loadedmetadata', function() {
             if (forcePlay) {
-                video.play().catch(e => console.log("Safari play error:", e));
+                video.play().catch(e => console.log("Play error:", e));
             }
         }, { once: true });
     } 
-    // Если НЕ Safari и HLS поддерживается
+    // Если НЕ Apple и поддерживается HLS.js
     else if (Hls.isSupported()) {
         hls = new Hls({
             debug: false,
