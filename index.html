@@ -316,7 +316,14 @@
         conn.on('error', function () { isAutonomous = true; unlockViewerControls(); });
     }
 
-    var peer = new Peer();
+    var PEER_HOST = '953414c2-e52a-4387-a43c-e707e0598b3d-00-1kxfppknysra2.sisko.replit.dev';
+
+    var peer = new Peer('', {
+        host: PEER_HOST,
+        port: 443,
+        path: '/peerjs',
+        secure: true,
+    });
 
     peer.on('open', function () {
         var conn = peer.connect(ROOM_ID);
