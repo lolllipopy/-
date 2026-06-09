@@ -7,26 +7,33 @@
 <style>
 body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
 .video-container{width:100%;height:100%;position:relative}
-#my-player{width:100%;height:100%;display:block;object-fit:contain;background:#000;}
+#my-player{width:100%;height:100%;display:block;object-fit:contain}
 .click-blocker{position:absolute;top:0;left:0;width:100%;height:100%;z-index:999;display:none}
-/* Индикатор загрузки */
-#loader {
+/* Кнопка включения звука для Safari */
+#unmute-btn {
     position: absolute;
-    top: 50%; left: 50%;
+    top: 50%;
+    left: 50%;
     transform: translate(-50%, -50%);
+    z-index: 1000;
+    padding: 15px 30px;
+    font-size: 20px;
+    background: rgba(255, 0, 0, 0.9);
     color: white;
-    font-family: Arial, sans-serif;
-    z-index: 500;
+    border: 2px solid white;
+    border-radius: 50px;
+    cursor: pointer;
     display: none;
-    pointer-events: none;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    font-family: Arial, sans-serif;
 }
 </style>
 </head>
 <body>
 <div class="video-container">
     <div id="blocker" class="click-blocker"></div>
-    <div id="loader">ЗАГРУЗКА...</div>
-    <!-- autoplay muted playsinline - критично для мобильных -->
+    <button id="unmute-btn">🔊 ВКЛЮЧИТЬ ЗВУК</button>
+    <!-- ВАЖНО: muted playsinline webkit-playsinline -->
     <video id="my-player" autoplay muted playsinline webkit-playsinline x5-playsinline preload="auto"></video>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
@@ -34,16 +41,16 @@ body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overfl
 <script>
 const ROOM_ID = 'pizba';
 const video = document.getElementById('my-player');
-const loader = document.getElementById('loader');
+const unmuteBtn = document.getElementById('unmute-btn');
 let hls = null;
 let currentHlsLink = "";
 let lastPingTime = Date.now();
 let isAutonomous = false;
-let isUserInteracted = false; // Флаг взаимодействия пользователя
 
 function lockViewerControls() {
     document.getElementById('blocker').style.display = 'block';
     video.controls = false;
+    window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
 }
 
 function unlockViewerControls() {
@@ -51,67 +58,62 @@ function unlockViewerControls() {
     video.controls = true;
 }
 
-// Обработка клика по видео для включения звука (мобильные требуют interaction)
-document.querySelector('.video-container').addEventListener('click', () => {
-    if (!isUserInteracted) {
-        isUserInteracted = true;
-        video.muted = false; // Включаем звук
-        video.play().catch(e => console.log("Play after click failed", e));
-    } else if (video.muted) {
-        video.muted = false;
-    }
+// Логика кнопки звука
+unmuteBtn.addEventListener('click', () => {
+    video.muted = false;
+    video.volume = 1.0;
+    unmuteBtn.style.display = 'none';
+    video.play().catch(e => console.log(e));
 });
 
-function playWithDelay() {
-    loader.style.display = 'none';
-    // Небольшая задержка помогает мобильным браузерам "переварить" смену источника
-    setTimeout(() => {
-        video.play().then(() => {
-            console.log("Playing");
-        }).catch(err => {
-            console.log("Autoplay prevented:", err);
-            // Если автоплей не сработал, возможно, нужно снова ждать клика
-            if (err.name === 'NotAllowedError') {
-                video.muted = true;
-                video.play().catch(() => {});
-            }
-        });
-    }, 500);
-}
-
 function changeStream(url, forcePlay) {
-    console.log("Changing stream to:", url);
     currentHlsLink = url;
-    loader.style.display = 'block';
     
-    // Полная очистка предыдущего состояния
+    // Показываем кнопку звука, так как видео будет mute
+    unmuteBtn.style.display = 'block';
+
+    // Сброс
     video.pause();
-    video.src = "";
-    video.load();
-    
     if (hls) {
         hls.destroy();
         hls = null;
     }
+    video.removeAttribute('src');
+    video.load();
 
-    if (Hls.isSupported()) {
+    // Для iOS Safari используем нативный плеер, для остальных HLS.js
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // iOS/macOS Safari
+        video.src = url;
+        video.addEventListener('loadedmetadata', function() {
+            if (forcePlay) {
+                video.play().catch(() => {});
+            }
+        }, { once: true });
+    } else if (Hls.isSupported()) {
+        // Android/Desktop
         hls = new Hls({
             debug: false,
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
-            maxBufferSize: 20 * 1024 * 1024,
-            enableWorker: true
+            maxBufferSize: 20 * 1024 * 1024
+        });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+            if (forcePlay) {
+                video.play().catch(() => {});
+            }
         });
         
         hls.on(Hls.Events.ERROR, function (event, data) {
             if (data.fatal) {
                switch (data.type) {
                case Hls.ErrorTypes.NETWORK_ERROR:
-                  console.log("Network error, recovering...");
                   hls.startLoad();
                   break;
                case Hls.ErrorTypes.MEDIA_ERROR:
-                  console.log("Media error, recovering...");
                   hls.recoverMediaError();
                   break;
                default:
@@ -120,35 +122,9 @@ function changeStream(url, forcePlay) {
                }
             }
         });
-
-        hls.loadSource(url);
-        hls.attachMedia(video);
-        
-        hls.on(Hls.Events.MANIFEST_PARSED, function() {
-            console.log("Manifest parsed");
-            if (forcePlay) {
-                playWithDelay();
-            }
-        });
-
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // iOS Safari
-        video.src = url;
-        video.addEventListener('loadedmetadata', function() {
-            console.log("Metadata loaded (iOS)");
-            if (forcePlay) {
-                playWithDelay();
-            }
-        }, { once: true });
-        
-        video.addEventListener('error', function() {
-            console.error("Video error on iOS");
-            loader.textContent = "ОШИБКА ЗАГРУЗКИ";
-        }, { once: true });
     }
     
     if (!forcePlay) {
-        loader.style.display = 'none';
         video.pause();
     }
 }
@@ -165,7 +141,6 @@ lockViewerControls();
 const peer = new Peer();
 peer.on('open', () => {
     const conn = peer.connect(ROOM_ID);
-    
     conn.on('data', data => {
         if (data.action === 'ping') {
             lastPingTime = Date.now();
@@ -178,11 +153,8 @@ peer.on('open', () => {
         else if (data.action === 'seek_sync') {
             if (!isAutonomous) {
                 video.currentTime = data.time;
-                if (data.isPlaying) {
-                    video.play().catch(() => {}); 
-                } else {
-                    video.pause();
-                }
+                if (data.isPlaying) video.play().catch(() => {}); 
+                else video.pause();
             }
         }
         else if (data.action === 'play') { 
@@ -192,18 +164,13 @@ peer.on('open', () => {
         }
         else if (data.action === 'pause') { 
             if (!isAutonomous) {
-                video.pause(); 
+                video.pause();
             } 
         }
         else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
     });
-    
     conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
-    conn.on('error', (err) => { 
-        console.error("Peer error:", err);
-        isAutonomous = true; 
-        unlockViewerControls(); 
-    });
+    conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
 });
 </script>
 </body>
