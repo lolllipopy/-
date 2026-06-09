@@ -5,22 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Пизба 2</title>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: sans-serif; }
-        .video-container { width: 100%; height: 100%; position: relative; display: flex; flex-direction: column; }
-        #my-player { width: 100%; flex-grow: 1; display: block; }
-        .click-blocker { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 50px); z-index: 999; display: none; }
-        
-        .info-panel { display: flex; padding: 15px; background: #111; color: #fff; align-items: center; border-bottom: 1px solid #333; }
-        #poster { width: 80px; height: 80px; object-fit: cover; margin-right: 15px; border-radius: 4px; background: #222; }
-        .text-content { display: flex; flex-direction: column; }
-        #stream-title { margin: 0; font-size: 18px; }
-        #stream-desc { margin: 5px 0 0 0; font-size: 14px; color: #ccc; }
+        body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
+        .video-container{width:100%;height:100%;position:relative}
+        #my-player{width:100%;height:100%;display:block}
+        .click-blocker{position:absolute;top:0;left:0;width:100%;height:calc(100% - 50px);z-index:999;display:none}
     </style>
 </head>
 <body>
-
 <div class="video-container">
-	<div id="blocker" class="click-blocker"></div>
+    <div id="blocker" class="click-blocker"></div>
     <video id="my-player" controls></video>
 </div>
 
@@ -45,8 +38,8 @@
     }
 
     function updateInfo(title) {
-    document.title = title;
-	}
+        document.title = title;
+    }
 
     function changeStream(url, forcePlay) {
         currentHlsLink = url;
@@ -60,7 +53,7 @@
     }
 
     window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
-    
+
     setInterval(() => {
         if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
             isAutonomous = true;
@@ -88,9 +81,7 @@
             } else if (data.action === 'play') { if (!isAutonomous && currentHlsLink) video.play().catch(() => {}); } 
             else if (data.action === 'pause') { if (!isAutonomous) video.pause(); } 
             else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
-            else if (data.action === 'update_info') {
-					updateInfo(data.title);
-			}
+            else if (data.action === 'update_info') { updateInfo(data.title); }
         });
         conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
         conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
