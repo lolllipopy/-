@@ -35,7 +35,6 @@ lowLatencyMode: true
 let currentHlsLink = "";
 let lastPingTime = Date.now();
 let isAutonomous = false;
-let hlsInstance = null;
 
 function lockViewerControls() {
 document.getElementById('blocker').style.display = 'block';
@@ -60,7 +59,7 @@ playBtn.style.display = 'none';
 playBtn.addEventListener('click', () => {
 hidePlayButton();
 if (currentHlsLink) {
-video.muted = false; // Можно включить звук после взаимодействия
+video.muted = false;
 attemptPlay();
 }
 });
@@ -76,14 +75,11 @@ throw error;
 function changeStream(url, forcePlay) {
 currentHlsLink = url;
 
-// Очищаем предыдущий HLS инстанс
-if (hlsInstance) {
-hlsInstance.destroy();
-hlsInstance = null;
+// Очищаем предыдущий источник
+if (hls) {
+hls.destroy();
 }
-
-if (Hls.isSupported()) {
-hlsInstance = new Hls({
+hls = new Hls({
 debug: false,
 maxBufferLength: 30,
 maxMaxBufferLength: 60,
@@ -92,10 +88,11 @@ enableWorker: true,
 lowLatencyMode: true
 });
 
-hlsInstance.loadSource(url);
-hlsInstance.attachMedia(video);
+if (Hls.isSupported()) {
+hls.loadSource(url);
+hls.attachMedia(video);
 
-hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+hls.on(Hls.Events.MANIFEST_PARSED, () => {
 if (forcePlay) {
 attemptPlay().then(() => {
 hidePlayButton();
@@ -107,20 +104,20 @@ video.pause();
 }
 });
 
-hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+hls.on(Hls.Events.ERROR, (event, data) => {
 if (data.fatal) {
 console.error('HLS fatal error:', data.type, data.details);
 switch(data.type) {
 case Hls.ErrorTypes.NETWORK_ERROR:
 console.log("fatal network error encountered, trying to recover");
-hlsInstance.startLoad();
+hls.startLoad();
 break;
 case Hls.ErrorTypes.MEDIA_ERROR:
 console.log("fatal media error encountered, trying to recover");
-hlsInstance.recoverMediaError();
+hls.recoverMediaError();
 break;
 default:
-hlsInstance.destroy();
+hls.destroy();
 break;
 }
 }
