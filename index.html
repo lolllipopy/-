@@ -21,17 +21,10 @@ body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overfl
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-const ROOM_ID = 'pizba';
+const ADMIN_ID = 'pizba-admin';
 const video = document.getElementById('my-player');
 const playBtn = document.getElementById('playBtn');
-let hls = new Hls({
-debug: false,
-maxBufferLength: 30,
-maxMaxBufferLength: 60,
-maxBufferSize: 20 * 1024 * 1024,
-enableWorker: true,
-lowLatencyMode: true
-});
+let hls = null;
 let currentHlsLink = "";
 let lastPingTime = Date.now();
 let isAutonomous = false;
@@ -55,7 +48,6 @@ function hidePlayButton() {
 playBtn.style.display = 'none';
 }
 
-// Обработка клика по кнопке Play
 playBtn.addEventListener('click', () => {
 hidePlayButton();
 if (currentHlsLink) {
@@ -75,10 +67,11 @@ throw error;
 function changeStream(url, forcePlay) {
 currentHlsLink = url;
 
-// Очищаем предыдущий источник
 if (hls) {
 hls.destroy();
 }
+
+if (Hls.isSupported()) {
 hls = new Hls({
 debug: false,
 maxBufferLength: 30,
@@ -87,8 +80,6 @@ maxBufferSize: 20 * 1024 * 1024,
 enableWorker: true,
 lowLatencyMode: true
 });
-
-if (Hls.isSupported()) {
 hls.loadSource(url);
 hls.attachMedia(video);
 
@@ -109,11 +100,9 @@ if (data.fatal) {
 console.error('HLS fatal error:', data.type, data.details);
 switch(data.type) {
 case Hls.ErrorTypes.NETWORK_ERROR:
-console.log("fatal network error encountered, trying to recover");
 hls.startLoad();
 break;
 case Hls.ErrorTypes.MEDIA_ERROR:
-console.log("fatal media error encountered, trying to recover");
 hls.recoverMediaError();
 break;
 default:
@@ -124,7 +113,6 @@ break;
 });
 
 } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-// Native HLS support (Safari iOS)
 video.src = url;
 video.addEventListener('loadedmetadata', () => {
 if (forcePlay) {
@@ -153,9 +141,10 @@ unlockViewerControls();
 
 lockViewerControls();
 
+// Зритель подключается к админу
 const peer = new Peer();
 peer.on('open', () => {
-const conn = peer.connect(ROOM_ID);
+const conn = peer.connect(ADMIN_ID);
 conn.on('data', data => {
 if (data.action === 'ping') {
 lastPingTime = Date.now();
@@ -187,7 +176,6 @@ conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
 conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
 });
 
-// Для iOS: инициируем playback после первого взаимодействия с документом
 document.addEventListener('touchstart', function initPlayback() {
 if (video.paused && currentHlsLink) {
 attemptPlay().catch(() => {});
@@ -195,7 +183,6 @@ attemptPlay().catch(() => {});
 document.removeEventListener('touchstart', initPlayback);
 }, { once: true });
 
-// Обработка видимости страницы
 document.addEventListener('visibilitychange', () => {
 if (!document.hidden && currentHlsLink && !isAutonomous) {
 attemptPlay().catch(() => {});
