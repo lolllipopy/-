@@ -5,16 +5,85 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Пизба 2</title>
     <style>
-        body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
-        .video-container{width:100%;height:100%;position:relative}
-        #my-player{width:100%;height:100%;display:block}
-        .click-blocker{position:absolute;top:0;left:0;width:100%;height:calc(100% - 50px);z-index:999;display:none}
+        * { box-sizing: border-box; }
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background-color: #000;
+            overflow: hidden;
+        }
+        .video-container {
+            width: 100%; height: 100%;
+            position: relative;
+        }
+        #my-player {
+            width: 100%; height: 100%;
+            display: block;
+        }
+        .click-blocker {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%;
+            height: calc(100% - 48px);
+            z-index: 999;
+            display: none;
+        }
+        .viewer-bar {
+            position: absolute;
+            bottom: 0; left: 0;
+            width: 100%;
+            height: 48px;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 14px;
+            background: linear-gradient(transparent, rgba(0,0,0,0.75));
+        }
+        .viewer-time {
+            color: #fff;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            user-select: none;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        }
+        .viewer-fullscreen-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.9;
+            transition: opacity 0.15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .viewer-fullscreen-btn:hover { opacity: 1; }
+        .viewer-fullscreen-btn svg {
+            width: 22px;
+            height: 22px;
+            fill: #fff;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
+        }
     </style>
 </head>
 <body>
 <div class="video-container">
     <div id="blocker" class="click-blocker"></div>
-    <video id="my-player" controls playsinline></video>
+    <video id="my-player" playsinline></video>
+    <div class="viewer-bar">
+        <span class="viewer-time" id="time-display">0:00 / 0:00</span>
+        <button class="viewer-fullscreen-btn" id="fs-btn" title="Полный экран">
+            <svg id="fs-icon-enter" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 4h-4v2h6v-6h-2v4z"/>
+            </svg>
+            <svg id="fs-icon-exit" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:none">
+                <path d="M5 9H3V3h6v2H5v4zm11-4V3h6v6h-2V5h-4zm-9 12H5v-4H3v6h6v-2zm9 0v2h6v-6h-2v4h-4z"/>
+            </svg>
+        </button>
+    </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
@@ -22,6 +91,10 @@
 <script>
     const ROOM_ID = 'pizba';
     const video = document.getElementById('my-player');
+    const timeDisplay = document.getElementById('time-display');
+    const fsBtn = document.getElementById('fs-btn');
+    const fsIconEnter = document.getElementById('fs-icon-enter');
+    const fsIconExit = document.getElementById('fs-icon-exit');
 
     let hls = null;
     let currentHlsLink = "";
@@ -30,29 +103,72 @@
     let reconnectTimer = null;
     let mediaErrorCount = 0;
 
-    function createHls() {
-        if (hls) {
-            hls.destroy();
-            hls = null;
+    function formatTime(sec) {
+        if (!isFinite(sec) || isNaN(sec)) return '0:00';
+        var s = Math.floor(sec);
+        var m = Math.floor(s / 60);
+        var h = Math.floor(m / 60);
+        s = s % 60;
+        m = m % 60;
+        var ss = s < 10 ? '0' + s : s;
+        var mm = (h > 0 && m < 10) ? '0' + m : m;
+        return h > 0 ? h + ':' + mm + ':' + ss : m + ':' + ss;
+    }
+
+    function updateTime() {
+        var cur = video.currentTime || 0;
+        var dur = video.duration || 0;
+        timeDisplay.textContent = formatTime(cur) + ' / ' + formatTime(dur);
+    }
+
+    video.addEventListener('timeupdate', updateTime);
+    video.addEventListener('durationchange', updateTime);
+    video.addEventListener('loadedmetadata', updateTime);
+
+    fsBtn.addEventListener('click', function () {
+        var container = document.querySelector('.video-container');
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+            if (container.requestFullscreen) {
+                container.requestFullscreen();
+            } else if (container.webkitRequestFullscreen) {
+                container.webkitRequestFullscreen();
+            } else if (video.webkitEnterFullscreen) {
+                video.webkitEnterFullscreen();
+            }
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
         }
+    });
+
+    function onFullscreenChange() {
+        var isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        fsIconEnter.style.display = isFs ? 'none' : '';
+        fsIconExit.style.display = isFs ? '' : 'none';
+    }
+
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+    function createHls() {
+        if (hls) { hls.destroy(); hls = null; }
 
         hls = new Hls({
             debug: false,
             enableWorker: true,
             lowLatencyMode: false,
-
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
             maxBufferSize: 20 * 1024 * 1024,
             maxBufferHole: 0.5,
-
             highBufferWatchdogPeriod: 2,
             nudgeOffset: 0.1,
             nudgeMaxRetry: 5,
-
             liveSyncDurationCount: 3,
             liveMaxLatencyDurationCount: 6,
-
             fragLoadingTimeOut: 20000,
             manifestLoadingTimeOut: 10000,
             levelLoadingTimeOut: 10000,
@@ -62,7 +178,6 @@
             fragLoadingRetryDelay: 1000,
             manifestLoadingRetryDelay: 1000,
             levelLoadingRetryDelay: 1000,
-
             startFragPrefetch: true,
             testBandwidth: true,
             progressive: false,
@@ -70,12 +185,10 @@
 
         hls.on(Hls.Events.ERROR, function (event, data) {
             if (!data.fatal) return;
-
             switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
                     hls.startLoad();
                     break;
-
                 case Hls.ErrorTypes.MEDIA_ERROR:
                     mediaErrorCount++;
                     if (mediaErrorCount <= 3) {
@@ -85,7 +198,6 @@
                         scheduleReconnect();
                     }
                     break;
-
                 default:
                     scheduleReconnect();
                     break;
