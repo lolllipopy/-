@@ -14,29 +14,137 @@
 <body>
 <div class="video-container">
     <div id="blocker" class="click-blocker"></div>
-    <video id="my-player" controls></video>
+    <video id="my-player" controls playsinline></video>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-    const ROOM_ID = 'pizba'; 
+    const ROOM_ID = 'pizba';
     const video = document.getElementById('my-player');
-    let hls = new Hls({
-    debug: false,                
-    maxBufferLength: 30,         
-    maxMaxBufferLength: 60,
-    maxBufferSize: 20 * 1024 * 1024 
-});
 
+    let hls = null;
     let currentHlsLink = "";
     let lastPingTime = Date.now();
     let isAutonomous = false;
+    let reconnectTimer = null;
+    let mediaErrorCount = 0;
+
+    function createHls() {
+        if (hls) {
+            hls.destroy();
+            hls = null;
+        }
+
+        hls = new Hls({
+            debug: false,
+            enableWorker: true,
+            lowLatencyMode: false,
+
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+            maxBufferSize: 20 * 1024 * 1024,
+            maxBufferHole: 0.5,
+
+            highBufferWatchdogPeriod: 2,
+            nudgeOffset: 0.1,
+            nudgeMaxRetry: 5,
+
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 6,
+
+            fragLoadingTimeOut: 20000,
+            manifestLoadingTimeOut: 10000,
+            levelLoadingTimeOut: 10000,
+            fragLoadingMaxRetry: 6,
+            manifestLoadingMaxRetry: 4,
+            levelLoadingMaxRetry: 4,
+            fragLoadingRetryDelay: 1000,
+            manifestLoadingRetryDelay: 1000,
+            levelLoadingRetryDelay: 1000,
+
+            startFragPrefetch: true,
+            testBandwidth: true,
+            progressive: false,
+        });
+
+        hls.on(Hls.Events.ERROR, function (event, data) {
+            if (!data.fatal) return;
+
+            switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                    hls.startLoad();
+                    break;
+
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                    mediaErrorCount++;
+                    if (mediaErrorCount <= 3) {
+                        hls.recoverMediaError();
+                    } else {
+                        mediaErrorCount = 0;
+                        scheduleReconnect();
+                    }
+                    break;
+
+                default:
+                    scheduleReconnect();
+                    break;
+            }
+        });
+
+        hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            mediaErrorCount = 0;
+        });
+
+        return hls;
+    }
+
+    function scheduleReconnect(delay) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(function () {
+            if (currentHlsLink) {
+                var wasPlaying = !video.paused;
+                changeStream(currentHlsLink, wasPlaying);
+            }
+        }, delay || 3000);
+    }
+
+    function tryPlay(forcePlay) {
+        if (!forcePlay) { video.pause(); return; }
+        video.play().catch(function () {
+            var wasMuted = video.muted;
+            video.muted = true;
+            video.play().catch(function () {
+                video.muted = wasMuted;
+            });
+        });
+    }
+
+    function changeStream(url, forcePlay) {
+        currentHlsLink = url;
+        clearTimeout(reconnectTimer);
+        mediaErrorCount = 0;
+
+        if (Hls.isSupported()) {
+            var h = createHls();
+            h.loadSource(url);
+            h.attachMedia(video);
+            h.once(Hls.Events.MANIFEST_PARSED, function () {
+                tryPlay(forcePlay);
+            });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+            video.load();
+            tryPlay(forcePlay);
+        }
+    }
 
     function lockViewerControls() {
         document.getElementById('blocker').style.display = 'block';
         video.controls = false;
-        window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
+        window.addEventListener('keydown', function(e) {
+            if (e.code === 'Space') e.preventDefault();
+        }, true);
     }
 
     function unlockViewerControls() {
@@ -44,50 +152,58 @@
         video.controls = true;
     }
 
-    function changeStream(url, forcePlay) {
-        currentHlsLink = url;
-        if (Hls.isSupported()) {
-            hls.loadSource(url);
-            hls.attachMedia(video);
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url;
-        }
-        if (forcePlay) video.play().catch(() => {}); else video.pause();
-    }
-
-    setInterval(() => {
+    setInterval(function () {
         if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
             isAutonomous = true;
-            unlockViewerControls(); 
+            unlockViewerControls();
         }
     }, 1000);
 
     lockViewerControls();
-    
-    const peer = new Peer();
-    peer.on('open', () => {
-        const conn = peer.connect(ROOM_ID);
-        conn.on('data', data => {
+
+    function setupConn(conn) {
+        conn.on('data', function (data) {
             if (data.action === 'ping') {
                 lastPingTime = Date.now();
                 if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
-            } 
+            }
             else if (data.action === 'sync_init' || data.action === 'change_src') {
                 changeStream(data.url, data.forcePlay || data.isPlaying);
-                if (data.time) video.currentTime = data.time;
-            } 
+                if (data.time != null) video.currentTime = data.time;
+            }
             else if (data.action === 'seek_sync') {
                 if (!isAutonomous) {
                     video.currentTime = data.time;
-                    if (data.isPlaying) video.play().catch(() => {}); else video.pause();
+                    if (data.isPlaying) video.play().catch(function(){});
+                    else video.pause();
                 }
-            } 
-            else if (data.action === 'play') { if (!isAutonomous && currentHlsLink) video.play().catch(() => {}); } 
-            else if (data.action === 'pause') { if (!isAutonomous) video.pause(); } 
-            else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
+            }
+            else if (data.action === 'play') {
+                if (!isAutonomous && currentHlsLink) video.play().catch(function(){});
+            }
+            else if (data.action === 'pause') {
+                if (!isAutonomous) video.pause();
+            }
+            else if (data.action === 'admin_away') {
+                isAutonomous = true;
+                unlockViewerControls();
+            }
         });
-        conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
-        conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
+
+        conn.on('close', function () { isAutonomous = true; unlockViewerControls(); });
+        conn.on('error', function () { isAutonomous = true; unlockViewerControls(); });
+    }
+
+    var peer = new Peer();
+
+    peer.on('open', function () {
+        var conn = peer.connect(ROOM_ID);
+        setupConn(conn);
+    });
+
+    peer.on('error', function () {
+        isAutonomous = true;
+        unlockViewerControls();
     });
 </script>
 </body>
