@@ -2,7 +2,6 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Пизба 2</title>
     <style>
         body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
@@ -16,79 +15,31 @@
     <div id="blocker" class="click-blocker"></div>
     <video id="my-player" controls></video>
 </div>
-
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
     const ROOM_ID = 'pizba';
     const video = document.getElementById('my-player');
-    let hls = new Hls({ debug: false, maxBufferLength: 30, maxMaxBufferLength: 60, maxBufferSize: 20 * 1024 * 1024 });
+    let hls = new Hls({ debug: false });
     let currentHlsLink = "";
     let lastPingTime = Date.now();
     let isAutonomous = false;
 
-    function lockViewerControls() {
-        document.getElementById('blocker').style.display = 'block';
-        video.controls = false;
-    }
+    function lockViewerControls() { document.getElementById('blocker').style.display = 'block'; video.controls = false; }
+    function unlockViewerControls() { document.getElementById('blocker').style.display = 'none'; video.controls = true; }
 
-    function unlockViewerControls() {
-        document.getElementById('blocker').style.display = 'none';
-        video.controls = true;
-    }
-
-    function updateInfo(title) {
-        document.title = title;
-    }
-
-    function changeStream(url, forcePlay) {
-        currentHlsLink = url;
-        if (Hls.isSupported()) {
-            hls.loadSource(url);
-            hls.attachMedia(video);
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url;
-        }
-        if (forcePlay) video.play().catch(() => {}); else video.pause();
-    }
-
-    window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
-
-    setInterval(() => {
-        if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
-            isAutonomous = true;
-            unlockViewerControls(); 
-        }
-    }, 1000);
-
-    lockViewerControls();
-    
     const peer = new Peer();
     peer.on('open', () => {
         const conn = peer.connect(ROOM_ID);
-		conn.on('open', () => {
-            isAutonomous = false;
-            lockViewerControls();
-        });
         conn.on('data', data => {
-            if (data.action === 'ping') {
-                lastPingTime = Date.now();
-                if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
-            } else if (data.action === 'sync_init' || data.action === 'change_src') {
-                changeStream(data.url, data.forcePlay || data.isPlaying);
-                if (data.time) video.currentTime = data.time;
-            } else if (data.action === 'seek_sync') {
-                if (!isAutonomous) {
-                    video.currentTime = data.time;
-                    if (data.isPlaying) video.play().catch(() => {}); else video.pause();
-                }
-            } else if (data.action === 'play') { if (!isAutonomous && currentHlsLink) video.play().catch(() => {}); } 
-            else if (data.action === 'pause') { if (!isAutonomous) video.pause(); } 
+            if (data.action === 'ping') { lastPingTime = Date.now(); if (isAutonomous) { isAutonomous = false; lockViewerControls(); } }
+            else if (data.action === 'change_src') { hls.loadSource(data.url); hls.attachMedia(video); video.play(); }
+            else if (data.action === 'play') { if (!isAutonomous) video.play(); }
+            else if (data.action === 'pause') { if (!isAutonomous) video.pause(); }
             else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
-            else if (data.action === 'update_info') { updateInfo(data.title); }
+            // ДОБАВЛЕНО:
+            else if (data.action === 'update_info') { document.title = data.title; }
         });
-        conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
-        conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
     });
 </script>
 </body>
