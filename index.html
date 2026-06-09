@@ -20,14 +20,7 @@
 <body>
 
 <div class="video-container">
-    <div class="info-panel">
-        <img id="poster" src="" alt="Постер">
-        <div class="text-content">
-            <h1 id="stream-title">Заголовок</h1>
-            <p id="stream-desc">Описание</p>
-        </div>
-    </div>
-    <div id="blocker" class="click-blocker"></div>
+	<div id="blocker" class="click-blocker"></div>
     <video id="my-player" controls></video>
 </div>
 
@@ -51,11 +44,9 @@
         video.controls = true;
     }
 
-    function updateInfo(title, desc, posterUrl) {
-        document.getElementById('stream-title').innerText = title;
-        document.getElementById('stream-desc').innerText = desc;
-        document.getElementById('poster').src = posterUrl;
-    }
+    function updateInfo(title) {
+    document.title = title;
+	}
 
     function changeStream(url, forcePlay) {
         currentHlsLink = url;
@@ -97,7 +88,9 @@
             } else if (data.action === 'play') { if (!isAutonomous && currentHlsLink) video.play().catch(() => {}); } 
             else if (data.action === 'pause') { if (!isAutonomous) video.pause(); } 
             else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
-            else if (data.action === 'update_info') { updateInfo(data.title, data.desc, data.posterUrl); }
+            else if (data.action === 'update_info') {
+					updateInfo(data.title);
+			}
         });
         conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
         conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
