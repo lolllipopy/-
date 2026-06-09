@@ -66,6 +66,10 @@
     const peer = new Peer();
     peer.on('open', () => {
         const conn = peer.connect(ROOM_ID);
+		conn.on('open', () => {
+            isAutonomous = false;
+            lockViewerControls();
+        });
         conn.on('data', data => {
             if (data.action === 'ping') {
                 lastPingTime = Date.now();
