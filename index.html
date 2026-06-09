@@ -273,25 +273,34 @@
 
         if (!s.url) return;
 
+        // Новый стрим — загружаем
+        if (s.url !== currentUrl) {
+            loadStream(s.url, s.isPlaying && userReady);
+            if (s.time > 1) {
+                video.addEventListener('canplay', function seek() {
+                    video.currentTime = s.time;
+                    video.removeEventListener('canplay', seek);
+                });
+            }
+            lastUpdatedAt = s.updatedAt;
+            return;
+        }
+
+        // Синхронизируем время при изменении состояния
         if (s.updatedAt !== lastUpdatedAt) {
             lastUpdatedAt = s.updatedAt;
-
-            if (s.url !== currentUrl) {
-                loadStream(s.url, s.isPlaying);
-                if (s.time > 1) {
-                    video.addEventListener('canplay', function seek() {
-                        video.currentTime = s.time;
-                        video.removeEventListener('canplay', seek);
-                    });
-                }
-                return;
-            }
-
             if (!isAutonomous) {
                 var diff = Math.abs(video.currentTime - s.time);
-                if (diff > 2) video.currentTime = s.time;
-                if (s.isPlaying && video.paused) tryPlay(true);
-                if (!s.isPlaying && !video.paused) video.pause();
+                if (diff > 3) video.currentTime = s.time;
+            }
+        }
+
+        // Синхронизируем play/pause на КАЖДОМ опросе — не ждём updatedAt
+        if (!isAutonomous && userReady && currentUrl) {
+            if (s.isPlaying && video.paused) {
+                video.play().catch(function () {});
+            } else if (!s.isPlaying && !video.paused) {
+                video.pause();
             }
         }
     }
