@@ -5,35 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Пизба 2</title>
 <style>
-body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
+body,html{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}
 .video-container{width:100%;height:100%;position:relative}
-#my-player{width:100%;height:100%;display:block;object-fit:contain}
+#my-player{width:100%;height:100%;display:block;object-fit:contain;background:#000}
 .click-blocker{position:absolute;top:0;left:0;width:100%;height:100%;z-index:999;display:none}
-#unmute-btn {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1000;
-    padding: 15px 30px;
-    font-size: 20px;
-    background: rgba(255, 0, 0, 0.9);
-    color: white;
-    border: 2px solid white;
-    border-radius: 50px;
-    cursor: pointer;
-    display: none;
-    box-shadow: 0 0 20px rgba(0,0,0,0.5);
-    font-family: Arial, sans-serif;
-}
+#unmute-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;padding:15px 30px;font-size:20px;background:rgba(255,0,0,0.9);color:white;border:2px solid white;border-radius:50px;cursor:pointer;display:none;box-shadow:0 0 20px rgba(0,0,0,0.5)}
 </style>
 </head>
 <body>
 <div class="video-container">
     <div id="blocker" class="click-blocker"></div>
     <button id="unmute-btn">🔊 ВКЛЮЧИТЬ ЗВУК</button>
-    <video id="my-player" autoplay muted playsinline webkit-playsinline x5-playsinline preload="auto" style="background:black"></video>
+    <video id="my-player" autoplay muted playsinline webkit-playsinline x5-playsinline preload="auto"></video>
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
@@ -44,13 +29,11 @@ let hls = null;
 let currentHlsLink = "";
 let lastPingTime = Date.now();
 let isAutonomous = false;
-let peerConn = null;
 
 function lockViewerControls() {
     document.getElementById('blocker').style.display = 'block';
     video.controls = false;
 }
-
 function unlockViewerControls() {
     document.getElementById('blocker').style.display = 'none';
     video.controls = true;
@@ -58,7 +41,7 @@ function unlockViewerControls() {
 
 unmuteBtn.addEventListener('click', () => {
     video.muted = false;
-    video.volume = 1.0;
+    video.volume = 1;
     unmuteBtn.style.display = 'none';
     video.play().catch(() => {});
 });
@@ -68,77 +51,57 @@ function changeStream(url, forcePlay = true) {
     unmuteBtn.style.display = 'block';
     video.pause();
     if (hls) { hls.destroy(); hls = null; }
-    video.removeAttribute('src');
-    video.load();
+    video.src = ''; video.load();
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = url;
         video.load();
-        if (forcePlay) {
-            video.play().catch(() => {});
-        }
+        if (forcePlay) setTimeout(() => video.play().catch(() => {}), 100);
     } else if (Hls.isSupported()) {
-        hls = new Hls({
-            debug: false,
-            maxBufferLength: 30,
-            maxMaxBufferLength: 60,
-            maxBufferSize: 30 * 1024 * 1024,
-            lowLatencyMode: true
-        });
+        hls = new Hls({maxBufferLength:30, maxMaxBufferLength:60});
         hls.loadSource(url);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             if (forcePlay) video.play().catch(() => {});
         });
-        hls.on(Hls.Events.ERROR, (event, data) => {
-            if (data.fatal) {
-                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-                else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-                else hls.destroy();
-            }
-        });
     }
 }
 
 setInterval(() => {
-    if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 5000)) {
-        isAutonomous = true;
-        unlockViewerControls();
+    if (currentHlsLink && !isAutonomous && Date.now() - lastPingTime > 5000) {
+        isAutonomous = true; unlockViewerControls();
     }
 }, 1000);
 
 lockViewerControls();
 
-const peer = new Peer({ config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+const peer = new Peer({config:{iceServers:[{urls:'stun:stun.l.google.com:19302'}]}});
 peer.on('open', () => {
-    peerConn = peer.connect(ROOM_ID, { reliable: true });
-    peerConn.on('open', () => {
-        console.log('Connected to admin');
-    });
-    peerConn.on('data', data => {
+    const conn = peer.connect(ROOM_ID, {reliable:true});
+    conn.on('data', data => {
         lastPingTime = Date.now();
         if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
-        
+
         if (data.action === 'sync_init' || data.action === 'change_src') {
             changeStream(data.url, data.forcePlay || data.isPlaying);
-            if (data.time !== undefined) setTimeout(() => { video.currentTime = data.time; }, 100);
-        }
-        else if (data.action === 'seek_sync') {
+            if (data.time !== undefined) setTimeout(() => video.currentTime = data.time, 200);
+        } else if (data.action === 'seek_sync') {
             if (!isAutonomous) {
                 video.currentTime = data.time;
-                if (data.isPlaying) video.play().catch(() => {});
-                else video.pause();
+                data.isPlaying ? video.play().catch(()=>{}) : video.pause();
             }
+        } else if (data.action === 'play') {
+            if (!isAutonomous) video.play().catch(()=>{});
+        } else if (data.action === 'pause') {
+            if (!isAutonomous) video.pause();
+        } else if (data.action === 'admin_away') {
+            isAutonomous = true; unlockViewerControls();
         }
-        else if (data.action === 'play') { if (!isAutonomous) video.play().catch(() => {}); }
-        else if (data.action === 'pause') { if (!isAutonomous) video.pause(); }
-        else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
     });
-    peerConn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
-    peerConn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
+    conn.on('close', () => {isAutonomous=true; unlockViewerControls();});
+    conn.on('error', () => {isAutonomous=true; unlockViewerControls();});
 });
-
-peer.on('error', () => { isAutonomous = true; unlockViewerControls(); });
+peer.on('error', () => {isAutonomous=true; unlockViewerControls();});
 </script>
 </body>
 </html>
