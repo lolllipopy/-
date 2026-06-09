@@ -2,85 +2,171 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Пизба 2</title>
 <style>
 body,html{margin:0;padding:0;width:100%;height:100%;background-color:#000;overflow:hidden;}
 .video-container{width:100%;height:100%;position:relative}
-#my-player{width:100%;height:100%;display:block}
-.click-blocker{position:absolute;top:0;left:0;width:100%;height:calc(100% - 50px);z-index:999;display:none}
+#my-player{width:100%;height:100%;display:block;object-fit:contain}
+.click-blocker{position:absolute;top:0;left:0;width:100%;height:100%;z-index:999;display:none}
+/* Кнопка включения звука */
+#unmute-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    padding: 15px 30px;
+    font-size: 20px;
+    background: rgba(255, 0, 0, 0.9);
+    color: white;
+    border: 2px solid white;
+    border-radius: 50px;
+    cursor: pointer;
+    display: none; /* Скрыта пока нет видео */
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+}
 </style>
 </head>
 <body>
 <div class="video-container">
-<div id="blocker" class="click-blocker"></div>
-<!-- ДОБАВЛЕНО: muted playsinline webkit-playsinline x5-playsinline -->
-<video id="my-player" controls autoplay muted playsinline webkit-playsinline x5-playsinline></video>
+    <div id="blocker" class="click-blocker"></div>
+    <button id="unmute-btn">🔊 ВКЛЮЧИТЬ ЗВУК</button>
+    <!-- ВАЖНО: muted обязательно для старта на мобильных -->
+    <video id="my-player" autoplay muted playsinline webkit-playsinline x5-playsinline preload="auto"></video>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
 const ROOM_ID = 'pizba';
 const video = document.getElementById('my-player');
-let hls = new Hls({
-debug: false,
-maxBufferLength: 30,
-maxMaxBufferLength: 60,
-maxBufferSize: 20 * 1024 * 1024
-});
+const unmuteBtn = document.getElementById('unmute-btn');
+let hls = null;
 let currentHlsLink = "";
 let lastPingTime = Date.now();
 let isAutonomous = false;
+
 function lockViewerControls() {
-document.getElementById('blocker').style.display = 'block';
-video.controls = false;
-window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
+    document.getElementById('blocker').style.display = 'block';
+    video.controls = false;
+    window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); }, true);
 }
+
 function unlockViewerControls() {
-document.getElementById('blocker').style.display = 'none';
-video.controls = true;
+    document.getElementById('blocker').style.display = 'none';
+    video.controls = true;
 }
+
+// Логика кнопки звука
+unmuteBtn.addEventListener('click', () => {
+    video.muted = false;
+    video.volume = 1.0;
+    unmuteBtn.style.display = 'none';
+    // Пробуем запустить еще раз на всякий случай
+    video.play().catch(e => console.log(e));
+});
+
 function changeStream(url, forcePlay) {
-currentHlsLink = url;
-if (Hls.isSupported()) {
-hls.loadSource(url);
-hls.attachMedia(video);
-} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-video.src = url;
+    currentHlsLink = url;
+    
+    // Показываем кнопку звука при новом стриме, так как он будет mute
+    unmuteBtn.style.display = 'block';
+
+    // ЖЕСТКАЯ ОСТАНОВКА ПЕРЕД СМЕНОЙ
+    video.pause();
+    
+    if (hls) {
+        hls.destroy();
+    }
+
+    if (Hls.isSupported()) {
+        hls = new Hls({
+            debug: false,
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+            maxBufferSize: 20 * 1024 * 1024
+        });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+            if (forcePlay) {
+                video.play().catch(() => {});
+            }
+        });
+        
+        hls.on(Hls.Events.ERROR, function (event, data) {
+            if (data.fatal) {
+               switch (data.type) {
+               case Hls.ErrorTypes.NETWORK_ERROR:
+                  hls.startLoad();
+                  break;
+               case Hls.ErrorTypes.MEDIA_ERROR:
+                  hls.recoverMediaError();
+                  break;
+               default:
+                  hls.destroy();
+                  break;
+               }
+            }
+        });
+
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.addEventListener('loadedmetadata', function() {
+            if (forcePlay) {
+                video.play().catch(() => {});
+            }
+        });
+    }
+    
+    if (!forcePlay) {
+        video.pause();
+    }
 }
-if (forcePlay) video.play().catch(() => {}); else video.pause();
-}
+
 setInterval(() => {
-if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
-isAutonomous = true;
-unlockViewerControls();
-}
+    if (currentHlsLink && !isAutonomous && (Date.now() - lastPingTime > 4000)) {
+        isAutonomous = true;
+        unlockViewerControls();
+    }
 }, 1000);
+
 lockViewerControls();
+
 const peer = new Peer();
 peer.on('open', () => {
-const conn = peer.connect(ROOM_ID);
-conn.on('data', data => {
-if (data.action === 'ping') {
-lastPingTime = Date.now();
-if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
-}
-else if (data.action === 'sync_init' || data.action === 'change_src') {
-changeStream(data.url, data.forcePlay || data.isPlaying);
-if (data.time) video.currentTime = data.time;
-}
-else if (data.action === 'seek_sync') {
-if (!isAutonomous) {
-video.currentTime = data.time;
-if (data.isPlaying) video.play().catch(() => {}); else video.pause();
-}
-}
-else if (data.action === 'play') { if (!isAutonomous && currentHlsLink) video.play().catch(() => {}); }
-else if (data.action === 'pause') { if (!isAutonomous) video.pause(); }
-else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
-});
-conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
-conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
+    const conn = peer.connect(ROOM_ID);
+    conn.on('data', data => {
+        if (data.action === 'ping') {
+            lastPingTime = Date.now();
+            if (isAutonomous) { isAutonomous = false; lockViewerControls(); }
+        }
+        else if (data.action === 'sync_init' || data.action === 'change_src') {
+            changeStream(data.url, data.forcePlay || data.isPlaying);
+            if (data.time) video.currentTime = data.time;
+        }
+        else if (data.action === 'seek_sync') {
+            if (!isAutonomous) {
+                video.currentTime = data.time;
+                if (data.isPlaying) video.play().catch(() => {}); 
+                else video.pause();
+            }
+        }
+        else if (data.action === 'play') { 
+            if (!isAutonomous && currentHlsLink) {
+                video.play().catch(() => {}); 
+            } 
+        }
+        else if (data.action === 'pause') { 
+            if (!isAutonomous) {
+                video.pause(); // Принудительная пауза
+            } 
+        }
+        else if (data.action === 'admin_away') { isAutonomous = true; unlockViewerControls(); }
+    });
+    conn.on('close', () => { isAutonomous = true; unlockViewerControls(); });
+    conn.on('error', () => { isAutonomous = true; unlockViewerControls(); });
 });
 </script>
 </body>
