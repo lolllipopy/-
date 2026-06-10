@@ -113,18 +113,42 @@
     var adminWasOnline  = false;
     var isAutonomous    = false;
     var userReady       = false;
-    var lastState       = null; // последнее состояние с сервера
+    var lastState       = null;
+    var lastStateReceivedAt = 0;
 
     /* ---------- Tap overlay ---------- */
 
     tapOverlay.addEventListener('click', function () {
         userReady = true;
         tapOverlay.classList.add('hidden');
-        // Если уже есть загруженный стрим — сразу запускаем
-        if (lastState && lastState.url) {
-            if (lastState.isPlaying) {
-                video.play().catch(function () {});
+        if (!lastState || !lastState.url || !currentUrl) return;
+
+        function doPlay() {
+            // Учитываем время прошедшее с момента последнего состояния
+            if (lastState.isPlaying && lastState.time >= 0) {
+                var elapsed = (Date.now() - lastStateReceivedAt) / 1000;
+                var target = lastState.time + elapsed;
+                if (isFinite(target) && Math.abs(video.currentTime - target) > 1) {
+                    video.currentTime = target;
+                }
             }
+            if (lastState.isPlaying) {
+                video.play().catch(function () {
+                    // Если браузер заблокировал — пробуем без звука
+                    video.muted = true;
+                    updateMuteIcon();
+                    video.play().catch(function () {});
+                });
+            }
+        }
+
+        if (video.readyState >= 2) {
+            doPlay();
+        } else {
+            video.addEventListener('canplay', function onReady() {
+                video.removeEventListener('canplay', onReady);
+                doPlay();
+            });
         }
     });
 
@@ -266,6 +290,7 @@
 
     function applyState(s) {
         lastState = s;
+        lastStateReceivedAt = Date.now();
 
         if (s.adminOnline && !adminWasOnline) { lockControls(); }
         else if (!s.adminOnline && adminWasOnline) { unlockControls(); }
