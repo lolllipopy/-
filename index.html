@@ -305,15 +305,17 @@
         }
     }
 
-    function poll() {
-        fetch(SERVER + '/api/state')
-            .then(function (r) { return r.json(); })
-            .then(function (s) { applyState(s); })
-            .catch(function () {});
+    function connectSSE() {
+        var es = new EventSource(SERVER + '/api/stream');
+        es.onmessage = function (e) {
+            try { applyState(JSON.parse(e.data)); } catch (err) {}
+        };
+        es.onerror = function () {
+            es.close();
+            setTimeout(connectSSE, 3000);
+        };
     }
-
-    setInterval(poll, 300);
-    poll();
+    connectSSE();
 </script>
 </body>
 </html>
