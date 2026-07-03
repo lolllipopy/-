@@ -17,6 +17,15 @@ app.use(function (req, res, next) {
     next();
 });
 
+// Статические файлы
+app.use(express.static(path.join(__dirname)));
+
+// Главная страница
+app.get('/', function(req, res) {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+
 // ====== REZKA АВТОРИЗАЦИЯ ======
 const REZKA_BASE = 'https://rezka.fi';
 const REZKA_COOKIES = process.env.DLE_USER_ID && process.env.DLE_PASSWORD
@@ -425,6 +434,12 @@ setInterval(function () {
     }
 }, 25000);
 
+
+
+// Редирект комнаты на viewer.html
+app.get('/room/:id', function(req, res) {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // ====== СТАРЫЕ ЭНДПОИНТЫ (совместимость) ======
 const SECRET = 'pizba2025';
