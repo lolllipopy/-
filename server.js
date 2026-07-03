@@ -157,8 +157,16 @@ app.get('/api/rezka/stream', async function (req, res) {
         const html = await r.text();
 
         // Ищем news_id для AJAX запроса
-        const newsIdMatch = html.match(/news_id\s*[:=]\s*(\d+)/) || html.match(/id:\s*(\d+)/);
-        const newsId = newsIdMatch ? newsIdMatch[1] : '';
+        // На rezka.fi news_id = ID из URL (например, /films/action/1483-... → 1483)
+        let newsId = '';
+        const urlIdMatch = url.match(/\/(\d+)-[^/]+\.html$/);
+        if (urlIdMatch) {
+            newsId = urlIdMatch[1];
+        } else {
+            // Fallback: ищем в HTML
+            const newsIdMatch = html.match(/news_id\s*[:=]\s*(\d+)/) || html.match(/id:\s*(\d+)/);
+            if (newsIdMatch) newsId = newsIdMatch[1];
+        }
 
         console.log('News ID:', newsId);
 
