@@ -547,23 +547,23 @@ body {
 
     hostPingInterval = setInterval(() => {
       postHost({ 
-        time: video.currentTime(), 
-        isPlaying: !video.paused(),
+        time: video.currentTime, 
+        isPlaying: !video.paused,
         action: 'ping'
       });
     }, 2000);
   }
 
   function onHostPlay() {
-    postHost({ isPlaying: true, time: video.currentTime(), action: 'play' });
+    postHost({ isPlaying: true, time: video.currentTime, action: 'play' });
     updatePlayIcon(true);
   }
   function onHostPause() {
-    postHost({ isPlaying: false, time: video.currentTime(), action: 'pause' });
+    postHost({ isPlaying: false, time: video.currentTime, action: 'pause' });
     updatePlayIcon(false);
   }
   function onHostSeek() {
-    postHost({ isPlaying: !video.paused(), time: video.currentTime(), action: 'seek' });
+    postHost({ isPlaying: !video.paused, time: video.currentTime, action: 'seek' });
   }
 
   async function postHost(data) {
@@ -605,9 +605,9 @@ body {
 
     if (data.url) {
       const proxyUrl = `${SERVER}/api/rezka/proxy.m3u8?url=${encodeURIComponent(data.url)}`;
-      const currentTime = video.currentTime();
+      const currentTime = video.currentTime;
 
-      loadStream(proxyUrl, !video.paused());
+      loadStream(proxyUrl, !video.paused);
 
       video.addEventListener('canplay', function seek() {
         video.currentTime = currentTime;
@@ -631,9 +631,9 @@ body {
 
     if (data.url) {
       const proxyUrl = `${SERVER}/api/rezka/proxy.m3u8?url=${encodeURIComponent(data.url)}`;
-      const currentTime = video.currentTime();
+      const currentTime = video.currentTime;
 
-      loadStream(proxyUrl, !video.paused());
+      loadStream(proxyUrl, !video.paused);
 
       video.addEventListener('canplay', function seek() {
         video.currentTime = currentTime;
