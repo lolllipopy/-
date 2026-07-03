@@ -268,13 +268,14 @@ app.get('/api/rezka/proxy.m3u8', async function (req, res) {
         const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
 
         // Заменяем ссылки на прокси (абсолютные и относительные)
+        const proxyHost = 'https://' + req.get('host');
         content = content.replace(/^(?!#)(.+)$/gm, (match) => {
             const trimmed = match.trim();
             if (!trimmed) return match;
 
             // Если уже абсолютный URL
             if (trimmed.startsWith('http')) {
-                return `${req.protocol}://${req.get('host')}/api/rezka/proxy.ts?url=${encodeURIComponent(trimmed)}`;
+                return `${proxyHost}/api/rezka/proxy.ts?url=${encodeURIComponent(trimmed)}`;
             }
 
             // Если относительный путь (./ или просто имя файла)
@@ -289,7 +290,7 @@ app.get('/api/rezka/proxy.m3u8', async function (req, res) {
                 absoluteUrl = baseUrl + trimmed;
             }
 
-            return `${req.protocol}://${req.get('host')}/api/rezka/proxy.ts?url=${encodeURIComponent(absoluteUrl)}`;
+            return `${proxyHost}/api/rezka/proxy.ts?url=${encodeURIComponent(absoluteUrl)}`;
         });
 
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
