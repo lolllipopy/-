@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -16,15 +17,6 @@ app.use(function (req, res, next) {
     if (req.method === 'OPTIONS') return res.sendStatus(200);
     next();
 });
-
-// Статические файлы
-app.use(express.static(path.join(__dirname)));
-
-// Главная страница
-app.get('/', function(req, res) {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
 
 // ====== REZKA АВТОРИЗАЦИЯ ======
 const REZKA_BASE = 'https://rezka.fi';
@@ -49,6 +41,18 @@ async function fetchRezka(url, opts = {}) {
     return r;
 }
 
+// ====== СТАТИЧЕСКИЕ ФАЙЛЫ ======
+app.use(express.static(path.join(__dirname)));
+
+app.get('/', function (req, res) {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/room/:id', function (req, res) {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+
 // ====== ПАРСИНГ REZKA ======
 
 // Поиск фильмов
@@ -59,32 +63,21 @@ app.get('/api/rezka/search', async function (req, res) {
         const html = await r.text();
 
         const films = [];
-        // Паттерн для результатов поиска
-        const regex = /<a href="(\/films\/[^"]+|\/series\/[^"]+|\/cartoons\/[^"]+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>/gi;
+        // Правильный паттерн для rezka.fi
+        const regex = /<div[^>]*class="b-content__inline_item"[^>]*data-url="([^"]+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"[^>]*>[\s\S]*?<div[^>]*class="b-content__inline_item-link"[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/gi;
 
         let match;
         while ((match = regex.exec(html)) !== null && films.length < 10) {
             films.push({
-                url: REZKA_BASE + match[1],
+                url: match[1],
                 title: match[3].trim(),
                 poster: match[2]
             });
         }
 
-        // Альтернативный паттерн если первый не сработал
-        if (films.length === 0) {
-            const altRegex = /<a href="(\/films\/[^"]+|\/series\/[^"]+)"[^>]*>[^<]*<span[^>]*>([^<]+)<\/span>/gi;
-            while ((match = altRegex.exec(html)) !== null && films.length < 10) {
-                films.push({
-                    url: REZKA_BASE + match[1],
-                    title: match[2].trim(),
-                    poster: ''
-                });
-            }
-        }
-
         res.json(films);
     } catch (e) {
+        console.error('Search error:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -96,32 +89,17 @@ app.get('/api/rezka/info', async function (req, res) {
         const r = await fetchRezka(url);
         const html = await r.text();
 
-        // Парсим переводы
+        // Парсим переводы через data-translator_id
         const translators = [];
-        const transMatch = html.match(/<ul[^>]*id="translators-list"[^>]*>([\s\S]*?)<\/ul>/);
-        if (transMatch) {
-            const transHtml = transMatch[1];
-            const transRegex = /<li[^>]*data-translator_id="(\d+)"[^>]*>([^<]+)<\/li>/gi;
-            let tm;
-            while ((tm = transRegex.exec(transHtml)) !== null) {
+        const transRegex = /data-translator_id="(\d+)"[^>]*>([^<]+)</gi;
+        let tm;
+        while ((tm = transRegex.exec(html)) !== null) {
+            // Убираем дубликаты
+            if (!translators.find(t => t.id === tm[1])) {
                 translators.push({
                     id: tm[1],
                     name: tm[2].trim()
                 });
-            }
-        }
-
-        // Если нет списка переводов, проверяем другие паттерны
-        if (translators.length === 0) {
-            const altRegex = /data-translator_id="(\d+)"[^>]*>([^<]+)</gi;
-            let tm;
-            while ((tm = altRegex.exec(html)) !== null) {
-                if (!translators.find(t => t.id === tm[1])) {
-                    translators.push({
-                        id: tm[1],
-                        name: tm[2].trim()
-                    });
-                }
             }
         }
 
@@ -148,6 +126,7 @@ app.get('/api/rezka/info', async function (req, res) {
             translators: translators.length > 0 ? translators : [{id: '1', name: 'Оригинал'}]
         });
     } catch (e) {
+        console.error('Info error:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -163,10 +142,11 @@ app.get('/api/rezka/stream', async function (req, res) {
         const html = await r.text();
 
         // Ищем news_id для AJAX запроса
-        const newsIdMatch = html.match(/news_id\s*:\s*(\d+)/) || html.match(/id:\s*(\d+)/);
+        const newsIdMatch = html.match(/news_id\s*[:=]\s*(\d+)/) || html.match(/id:\s*(\d+)/);
         const newsId = newsIdMatch ? newsIdMatch[1] : '';
 
         let streams = {};
+        let title = '';
 
         // Пробуем получить через AJAX API
         if (newsId) {
@@ -191,17 +171,24 @@ app.get('/api/rezka/stream', async function (req, res) {
 
                 const ajaxData = await ajaxR.json();
                 if (ajaxData.success && ajaxData.url) {
-                    // Декодируем URL
-                    const decoded = Buffer.from(ajaxData.url, 'base64').toString('utf8');
-                    // Парсим качества
-                    const qualityRegex = /\[(\d+p)\]([^\[]+)\[\/\]/g;
-                    let qm;
-                    while ((qm = qualityRegex.exec(decoded)) !== null) {
-                        streams[qm[1]] = qm[2].split(',').map(s => s.trim().split(' or ')[0]).filter(Boolean);
+                    // Парсим формат [360p]url1 or url2[480p]url3...
+                    const rawUrl = ajaxData.url;
+                    const parts = rawUrl.split(/\[(\d+p)\]/).filter(Boolean);
+
+                    for (let i = 0; i < parts.length; i += 2) {
+                        const q = parts[i];
+                        if (i + 1 < parts.length) {
+                            const urls = parts[i + 1].split(' or ').map(u => u.trim()).filter(Boolean);
+                            // Берём только m3u8 URL
+                            const m3u8Urls = urls.filter(u => u.includes('m3u8'));
+                            streams[q] = m3u8Urls.length > 0 ? m3u8Urls : urls;
+                        }
                     }
                 }
+
+                if (ajaxData.title) title = ajaxData.title;
             } catch (ajaxErr) {
-                console.log('AJAX failed, falling back to inline:', ajaxErr.message);
+                console.log('AJAX failed:', ajaxErr.message);
             }
         }
 
@@ -211,13 +198,17 @@ app.get('/api/rezka/stream', async function (req, res) {
             if (cdnMatch) {
                 try {
                     const decoded = Buffer.from(cdnMatch[1], 'base64').toString('utf8');
-                    const qualityRegex = /\[(\d+p)\]([^\[]+)\[\/\]/g;
-                    let qm;
-                    while ((qm = qualityRegex.exec(decoded)) !== null) {
-                        streams[qm[1]] = qm[2].split(',').map(s => s.trim().split(' or ')[0]).filter(Boolean);
+                    const parts = decoded.split(/\[(\d+p)\]/).filter(Boolean);
+                    for (let i = 0; i < parts.length; i += 2) {
+                        const q = parts[i];
+                        if (i + 1 < parts.length) {
+                            const urls = parts[i + 1].split(' or ').map(u => u.trim()).filter(Boolean);
+                            const m3u8Urls = urls.filter(u => u.includes('m3u8'));
+                            streams[q] = m3u8Urls.length > 0 ? m3u8Urls : urls;
+                        }
                     }
                 } catch (e) {
-                    console.log('Decode failed:', e.message);
+                    console.log('Inline decode failed:', e.message);
                 }
             }
         }
@@ -227,14 +218,15 @@ app.get('/api/rezka/stream', async function (req, res) {
         const selectedQuality = availableQualities.includes(quality) ? quality : (availableQualities[0] || '720p');
 
         res.json({
-            title: '',
+            title,
             description: '',
-            streams: streams,
+            streams,
             selectedQuality,
             availableQualities,
             url: streams[selectedQuality] ? streams[selectedQuality][0] : ''
         });
     } catch (e) {
+        console.error('Stream error:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -434,12 +426,6 @@ setInterval(function () {
     }
 }, 25000);
 
-
-
-// Редирект комнаты на viewer.html
-app.get('/room/:id', function(req, res) {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
 
 // ====== СТАРЫЕ ЭНДПОИНТЫ (совместимость) ======
 const SECRET = 'pizba2025';
