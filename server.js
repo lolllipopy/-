@@ -90,18 +90,27 @@ app.get('/api/rezka/info', async function (req, res) {
         const html = await r.text();
 
         // Парсим переводы через data-translator_id
-        const translators = [];
+        const allTranslators = [];
         const transRegex = /data-translator_id="(\d+)"[^>]*>([^<]+)</gi;
         let tm;
         while ((tm = transRegex.exec(html)) !== null) {
-            // Убираем дубликаты
-            if (!translators.find(t => t.id === tm[1])) {
-                translators.push({
+            if (!allTranslators.find(t => t.id === tm[1])) {
+                allTranslators.push({
                     id: tm[1],
                     name: tm[2].trim()
                 });
             }
         }
+
+        // Фильтруем только нужные озвучки
+        const allowedNames = ['Дубляж', 'LostFilm', 'HDrezka в Кубе', 'Kubik³', 'Оригинал', 'Red Head Sound'];
+        const translators = allTranslators.filter(t => {
+            const lower = t.name.toLowerCase();
+            return allowedNames.some(a => lower.includes(a.toLowerCase()));
+        });
+
+        console.log('All translators:', allTranslators.map(t => t.name));
+        console.log('Filtered translators:', translators.map(t => t.name));
 
         // Заголовок
         const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
@@ -138,12 +147,20 @@ app.get('/api/rezka/stream', async function (req, res) {
         const translatorId = req.query.translator || '1';
         const quality = req.query.quality || '720p';
 
+        console.log('Stream request:', { url: url ? url.substring(0, 50) : 'empty', translatorId, quality });
+
+        if (!url) {
+            return res.status(400).json({ error: 'No URL provided' });
+        }
+
         const r = await fetchRezka(url);
         const html = await r.text();
 
         // Ищем news_id для AJAX запроса
         const newsIdMatch = html.match(/news_id\s*[:=]\s*(\d+)/) || html.match(/id:\s*(\d+)/);
         const newsId = newsIdMatch ? newsIdMatch[1] : '';
+
+        console.log('News ID:', newsId);
 
         let streams = {};
         let title = '';
@@ -156,6 +173,8 @@ app.get('/api/rezka/stream', async function (req, res) {
                 formData.append('id', newsId);
                 formData.append('translator_id', translatorId);
                 formData.append('action', 'get_movie');
+
+                console.log('AJAX request:', { id: newsId, translator_id: translatorId });
 
                 const ajaxR = await fetch(ajaxUrl, {
                     method: 'POST',
@@ -170,52 +189,42 @@ app.get('/api/rezka/stream', async function (req, res) {
                 });
 
                 const ajaxData = await ajaxR.json();
+                console.log('AJAX response success:', ajaxData.success);
+
                 if (ajaxData.success && ajaxData.url) {
-                    // Парсим формат [360p]url1 or url2[480p]url3...
                     const rawUrl = ajaxData.url;
+                    console.log('Raw URL length:', rawUrl.length);
+
+                    // Парсим формат [360p]url1 or url2[480p]url3...
                     const parts = rawUrl.split(/\[(\d+p)\]/).filter(Boolean);
+                    console.log('Parsed parts count:', parts.length);
 
                     for (let i = 0; i < parts.length; i += 2) {
                         const q = parts[i];
                         if (i + 1 < parts.length) {
                             const urls = parts[i + 1].split(' or ').map(u => u.trim()).filter(Boolean);
-                            // Берём только m3u8 URL
-                            const m3u8Urls = urls.filter(u => u.includes('m3u8'));
-                            streams[q] = m3u8Urls.length > 0 ? m3u8Urls : urls;
+                            console.log(`Quality ${q}:`, urls.length, 'URLs');
+                            streams[q] = urls;
                         }
                     }
+                } else {
+                    console.log('AJAX failed:', ajaxData.message || 'no url');
                 }
 
                 if (ajaxData.title) title = ajaxData.title;
             } catch (ajaxErr) {
-                console.log('AJAX failed:', ajaxErr.message);
+                console.log('AJAX error:', ajaxErr.message);
             }
         }
 
-        // Fallback: парсим inline streams
-        if (Object.keys(streams).length === 0) {
-            const cdnMatch = html.match(/streams":"([^"]+)"/);
-            if (cdnMatch) {
-                try {
-                    const decoded = Buffer.from(cdnMatch[1], 'base64').toString('utf8');
-                    const parts = decoded.split(/\[(\d+p)\]/).filter(Boolean);
-                    for (let i = 0; i < parts.length; i += 2) {
-                        const q = parts[i];
-                        if (i + 1 < parts.length) {
-                            const urls = parts[i + 1].split(' or ').map(u => u.trim()).filter(Boolean);
-                            const m3u8Urls = urls.filter(u => u.includes('m3u8'));
-                            streams[q] = m3u8Urls.length > 0 ? m3u8Urls : urls;
-                        }
-                    }
-                } catch (e) {
-                    console.log('Inline decode failed:', e.message);
-                }
-            }
-        }
+        console.log('Available qualities:', Object.keys(streams));
 
         // Фильтруем по запрошенному качеству
         const availableQualities = Object.keys(streams).sort((a, b) => parseInt(b) - parseInt(a));
-        const selectedQuality = availableQualities.includes(quality) ? quality : (availableQualities[0] || '720p');
+        const selectedQuality = availableQualities.includes(quality) ? quality : (availableQualities[0] || '');
+
+        const resultUrl = streams[selectedQuality] ? streams[selectedQuality][0] : '';
+        console.log('Selected quality:', selectedQuality, 'URL:', resultUrl ? resultUrl.substring(0, 80) : 'none');
 
         res.json({
             title,
@@ -223,7 +232,7 @@ app.get('/api/rezka/stream', async function (req, res) {
             streams,
             selectedQuality,
             availableQualities,
-            url: streams[selectedQuality] ? streams[selectedQuality][0] : ''
+            url: resultUrl
         });
     } catch (e) {
         console.error('Stream error:', e);
