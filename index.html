@@ -52,15 +52,15 @@ body {
 
 .results {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
   margin-bottom: 20px;
   max-height: 400px;
   overflow-y: auto;
 }
 .result-item {
   background: #1a1a1a;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.15s;
@@ -68,13 +68,13 @@ body {
 .result-item:active { transform: scale(0.96); }
 .result-item img {
   width: 100%;
-  aspect-ratio: 2/3;
+  height: 160px;
   object-fit: cover;
   display: block;
 }
-.result-item .info { padding: 10px; }
+.result-item .info { padding: 8px; }
 .result-item .title {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.3;
   display: -webkit-box;
@@ -82,7 +82,6 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.result-item .meta { font-size: 12px; color: #888; margin-top: 4px; }
 
 /* === Выбор озвучки и качества === */
 .options-panel {
@@ -92,13 +91,13 @@ body {
   margin-bottom: 16px;
 }
 .options-panel h3 {
-  font-size: 16px;
-  margin-bottom: 12px;
-  color: #aaa;
+  font-size: 14px;
+  margin-bottom: 10px;
+  color: #888;
 }
 .option-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
@@ -107,9 +106,9 @@ body {
   background: #333;
   border: 1px solid #444;
   color: #fff;
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -117,7 +116,6 @@ body {
 .option-btn.selected {
   background: #2563eb;
   border-color: #2563eb;
-  color: #fff;
 }
 .option-btn:disabled {
   opacity: 0.4;
@@ -430,13 +428,10 @@ body {
   let isDraggingTimeline = false;
   let isLiveSync = true;
 
-  // Данные фильма
   let selectedFilm = null;
   let selectedTranslator = null;
   let selectedQuality = '720p';
   let availableTranslators = [];
-  let availableQualities = [];
-  let filmStreams = {};
 
   // ====== ИНИЦИАЛИЗАЦИЯ ======
   if (isHost) {
@@ -463,7 +458,6 @@ body {
         <img src="${f.poster}" alt="" onerror="this.style.display='none'">
         <div class="info">
           <div class="title">${f.title}</div>
-          <div class="meta">Нажмите для выбора</div>
         </div>
       </div>
     `).join('');
@@ -473,22 +467,18 @@ body {
   window.selectFilm = async function(filmUrl) {
     selectedFilm = filmUrl;
 
-    // Получаем инфо о фильме + переводы
     const res = await fetch(`${SERVER}/api/rezka/info?url=${encodeURIComponent(filmUrl)}`);
     const info = await res.json();
 
     availableTranslators = info.translators || [{id: '1', name: 'Оригинал'}];
     selectedTranslator = availableTranslators[0];
 
-    // Показываем панель выбора
     hostOptions.classList.remove('hidden');
 
-    // Рендерим переводы
     translatorOptions.innerHTML = availableTranslators.map((t, i) => `
-      <button class="option-btn ${i === 0 ? 'selected' : ''}" data-translator="${t.id}" onclick="selectTranslator('${t.id}', '${t.name.replace(/'/g, "\'")}')">${t.name}</button>
+      <button class="option-btn ${i === 0 ? 'selected' : ''}" data-translator="${t.id}" onclick="selectTranslator('${t.id}', '${t.name.replace(/'/g, "\\'")}')">${t.name}</button>
     `).join('');
 
-    // Скроллим к опциям
     hostOptions.scrollIntoView({ behavior: 'smooth' });
   };
 
@@ -510,12 +500,8 @@ body {
   window.startFilm = async function() {
     if (!selectedFilm || !selectedTranslator) return;
 
-    // Получаем потоки
     const res = await fetch(`${SERVER}/api/rezka/stream?url=${encodeURIComponent(selectedFilm)}&translator=${selectedTranslator.id}&quality=${selectedQuality}`);
     const data = await res.json();
-
-    filmStreams = data.streams;
-    availableQualities = data.availableQualities || ['720p'];
 
     const streamUrl = data.url;
     if (!streamUrl) {
@@ -525,7 +511,6 @@ body {
 
     const proxyUrl = `${SERVER}/api/rezka/proxy.m3u8?url=${encodeURIComponent(streamUrl)}`;
 
-    // Создаём комнату
     const createRes = await fetch(`${SERVER}/api/room/create`, { method: 'POST' });
     const roomData = await createRes.json();
     roomId = roomData.roomId;
@@ -625,7 +610,6 @@ body {
 
       loadStream(proxyUrl, !video.paused());
 
-      // Восстанавливаем позицию
       video.addEventListener('canplay', function seek() {
         video.currentTime = currentTime;
         video.removeEventListener('canplay', seek);
@@ -724,7 +708,6 @@ body {
       return;
     }
 
-    // Обновляем инфо о переводе
     if (s.translatorName) currentTranslator.textContent = s.translatorName;
     if (s.quality) currentQuality.textContent = s.quality;
 
@@ -838,7 +821,6 @@ body {
   translatorBtn.addEventListener('click', async function() {
     if (!lastState || !lastState.filmUrl) return;
 
-    // Получаем список переводов
     const res = await fetch(`${SERVER}/api/rezka/info?url=${encodeURIComponent(lastState.filmUrl)}`);
     const info = await res.json();
 
